@@ -3,7 +3,7 @@ import requests
 # --- PREENCHA AQUI COM SEUS DADOS ---
 CLIENT_ID = "197487"
 CLIENT_SECRET = "2d7e380d8348b5ea2a8e4adf64fdcd69b2ef116f"
-CALLBACK_URL = "https://SUA-URL-DO-RENDER.onrender.com/webhook" # Verifique se termina com /webhook
+CALLBACK_URL = "https://projeto-treinador.onrender.com/webhook" # Verifique se termina com /webhook
 VERIFY_TOKEN = "STRAVA"
 
 def atualizar_webhook():
