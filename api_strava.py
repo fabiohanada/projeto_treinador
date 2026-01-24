@@ -28,8 +28,14 @@ def calcular_trimp_direto(duracao_seg, fc_media):
 @app.get("/webhook")
 async def validar_webhook(request: Request):
     params = request.query_params
-    hub_challenge = params.get("hub.challenge")
-    return {"hub.challenge": hub_challenge}
+    challenge = params.get("hub.challenge")
+    token = params.get("hub.verify_token")
+    
+    # O Strava exige que você retorne exatamente o challenge que ele enviou
+    if token == "STRAVA":
+        return {"hub.challenge": challenge}
+    
+    return {"status": "token invalido"}
 
 @app.post("/webhook")
 async def receber_evento_strava(request: Request):
