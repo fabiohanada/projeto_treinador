@@ -26,7 +26,6 @@ supabase = create_client(url, key)
 
 CLIENT_ID = get_secret("STRAVA_CLIENT_ID")
 CLIENT_SECRET = get_secret("STRAVA_CLIENT_SECRET")
-# AJUSTE: Use a URL real do seu app aqui
 REDIRECT_URI = "https://seu-treino-app.streamlit.app" 
 
 # --- FUNÇÕES DE SEGURANÇA ---
@@ -101,7 +100,7 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
     st.session_state.user_info = None
 
-# --- CAPTURA RETORNO DO STRAVA (NA MESMA ABA) ---
+# --- CAPTURA RETORNO DO STRAVA ---
 if "code" in st.query_params:
     code = st.query_params["code"]
     res_token = requests.post("https://www.strava.com/oauth/token", data={
@@ -117,8 +116,6 @@ if "code" in st.query_params:
         }
         supabase.table("usuarios").upsert(u_strava).execute()
         sincronizar_atividades(u_strava["strava_id"], u_strava["access_token"], u_strava["nome"])
-        
-        # Limpa os parâmetros e recarrega para sumir o código da URL
         st.query_params.clear()
         st.rerun()
 
@@ -173,24 +170,22 @@ if not st.session_state.logado:
                     else: st.error("Erro ao cadastrar.")
     st.stop()
 
-# --- DASHBOARD (SÓ ACESSÍVEL LOGADO) ---
+# --- DASHBOARD (LOGADO) ---
+
+# 1. Informações do Perfil
 st.sidebar.markdown(f"### 👤 {st.session_state.user_info['nome']}")
 
-# BOTÃO STRAVA COM TARGET SELF (NÃO ABRE NOVA ABA)
+# 2. Conectar ao Strava (Mesma aba)
 auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
 st.sidebar.markdown(f"""
     <a href="{auth_url}" target="_self" style="text-decoration: none;">
-        <div style="background-color: #FC4C02; color: white; text-align: center; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 10px;">
+        <div style="background-color: #FC4C02; color: white; text-align: center; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 20px;">
             🟠 Conectar ao Strava
         </div>
     </a>
 """, unsafe_allow_html=True)
 
-if st.sidebar.button("Sair"):
-    st.session_state.logado = False
-    st.rerun()
-
-# --- EXIBIÇÃO DE DADOS ---
+# 3. Seleção de Atleta e Sincronizar
 usuarios = supabase.table("usuarios").select("*").execute()
 if usuarios.data:
     opcoes = {u['nome']: u['strava_id'] for u in usuarios.data}
@@ -198,11 +193,20 @@ if usuarios.data:
     atleta_id = opcoes[nome_sel]
     token_atleta = next(u['access_token'] for u in usuarios.data if u['strava_id'] == atleta_id)
 
-    if st.sidebar.button("🔄 Sincronizar Agora"):
+    if st.sidebar.button("🔄 Sincronizar Agora", use_container_width=True):
         if sincronizar_atividades(atleta_id, token_atleta, nome_sel):
             st.sidebar.success("Atualizado!")
             st.rerun()
 
+# 4. Botão Sair (Agora posicionado abaixo de tudo)
+st.sidebar.divider()
+if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
+    st.session_state.logado = False
+    st.session_state.user_info = None
+    st.rerun()
+
+# --- CONTEÚDO PRINCIPAL ---
+if usuarios.data:
     st.title("📊 Painel de Performance")
     res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", int(atleta_id)).execute()
     if res_atv.data:
