@@ -192,7 +192,7 @@ if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
 
 # Conteúdo Principal
 if usuarios.data:
-    st.title(f"📊 Painel: {nome_sel}")
+    st.title(f"📊 Painel de Atividades")
     res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", int(atleta_id)).execute()
     if res_atv.data:
         df = pd.DataFrame(res_atv.data)
