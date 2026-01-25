@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd  # CORRIGIDO: de 'import pd' para 'import pandas'
+import pandas as pd
 import os
 import requests
 from supabase import create_client
@@ -66,12 +66,12 @@ def enviar_whatsapp_twilio(mensagem):
         return True
     except: return False
 
-# --- FUNÇÃO DE SINCRONIZAÇÃO SILENCIOSA (AUTOMÁTICA) ---
+# --- FUNÇÃO DE SINCRONIZAÇÃO SILENCIOSA ---
 def sincronizar_silencioso(strava_id, access_token):
     url_atv = "https://www.strava.com/api/v3/athlete/activities"
     headers = {'Authorization': f'Bearer {access_token}'}
     try:
-        res = requests.get(url_atv, headers=headers, params={'per_page': 5})
+        res = requests.get(url_atv, headers=headers, params={'per_page': 10})
         if res.status_code == 200:
             atividades = res.json()
             for atv in atividades:
@@ -112,101 +112,69 @@ if "code" in st.query_params:
         st.query_params.clear()
         st.rerun()
 
-# --- INTERFACE: LOGIN / CADASTRO ---
+# --- INTERFACE: LOGIN ---
 if not st.session_state.logado:
-    st.markdown("""
-        <style>
-        div.stButton > button:first-child { background-color: #007bff; color: white; border: none; font-weight: bold; border-radius: 8px; height: 45px; }
-        .main-header { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; }
-        .runner-icon { font-size: 40px; color: #ff4b4b; }
-        .title-text { font-size: 32px; font-weight: bold; color: #31333F; }
-        .stTabs [data-baseweb="tab-highlight"] { background-color: #ff4b4b; }
-        </style>
-    """, unsafe_allow_html=True)
-
+    st.markdown("""<style>div.stButton > button:first-child { background-color: #007bff; color: white; font-weight: bold; border-radius: 8px; height: 45px; }</style>""", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 1.3, 1])
     with col2:
-        st.markdown("""
-            <div class='main-header'>
-                <span class='runner-icon'>🏃‍♂️</span>
-                <span class='title-text'>Seu Treino App</span>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown("## 🏃‍♂️ Seu Treino App")
         tab1, tab2 = st.tabs(["Entrar", "Criar Conta"])
         with tab1:
-            e = st.text_input("Email", key="l_email")
-            s = st.text_input("Senha", type="password", key="l_senha")
+            e = st.text_input("Email")
+            s = st.text_input("Senha", type="password")
             if st.button("Acessar Painel", use_container_width=True):
                 u = validar_login(e, s)
                 if u:
                     st.session_state.logado = True
                     st.session_state.user_info = u
                     st.rerun()
-                else: st.error("E-mail ou senha incorretos.")
-        with tab2:
-            n_c = st.text_input("Nome")
-            e_c = st.text_input("E-mail")
-            t_c = st.text_input("WhatsApp (Ex: 5511999999999)")
-            s_c = st.text_input("Senha", type="password")
-            if st.button("Cadastrar e Entrar", use_container_width=True):
-                if n_c and e_c and t_c and s_c:
-                    if cadastrar_usuario(n_c, e_c, s_c, t_c):
-                        u_novo = validar_login(e_c, s_c)
-                        if u_novo:
-                            st.session_state.logado = True
-                            st.session_state.user_info = u_novo
-                            st.rerun()
-                    else: st.error("Erro ao cadastrar.")
+                else: st.error("Dados incorretos.")
     st.stop()
 
 # --- DASHBOARD LOGADO ---
-
-# Sincronização automática ao carregar a página (roda uma vez por sessão)
 usuarios = supabase.table("usuarios").select("*").execute()
 if "auto_sync_done" not in st.session_state and usuarios.data:
     for u in usuarios.data:
         sincronizar_silencioso(u['strava_id'], u['access_token'])
     st.session_state.auto_sync_done = True
 
-# Sidebar
 st.sidebar.markdown(f"### 👤 {st.session_state.user_info['nome']}")
-
 auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
-st.sidebar.markdown(f"""
-    <a href="{auth_url}" target="_self" style="text-decoration: none;">
-        <div style="background-color: #FC4C02; color: white; text-align: center; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 20px;">
-            🟠 Conectar ao Strava
-        </div>
-    </a>
-""", unsafe_allow_html=True)
+st.sidebar.markdown(f'<a href="{auth_url}" target="_self"><div style="background-color: #FC4C02; color: white; text-align: center; padding: 10px; border-radius: 8px; font-weight: bold;">🟠 Conectar Strava</div></a>', unsafe_allow_html=True)
 
 if usuarios.data:
     opcoes = {u['nome']: u['strava_id'] for u in usuarios.data}
     nome_sel = st.sidebar.selectbox("Selecionar Atleta", list(opcoes.keys()))
     atleta_id = opcoes[nome_sel]
 
-st.sidebar.divider()
-if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
-    st.session_state.logado = False
-    st.rerun()
-
-# Conteúdo Principal
-if usuarios.data:
-    st.title(f"📊 Painel de Atividades")
+    st.title(f"📊 Painel: {nome_sel}")
     res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", int(atleta_id)).execute()
+    
     if res_atv.data:
         df = pd.DataFrame(res_atv.data)
-        df['data_treino'] = pd.to_datetime(df['data_treino'])
+        df['data_treino'] = pd.to_datetime(df['data_treino']).dt.date # Apenas a data, sem hora
         df = df.sort_values('data_treino')
         
+        # 1. Gráfico de Carga (Existente)
         st.subheader("📈 Carga Aguda vs Crônica")
-        df['Aguda'] = df['trimp_score'].rolling(7).mean()
-        df['Cronica'] = df['trimp_score'].rolling(28).mean()
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(df['data_treino'], df['Aguda'], label="Aguda", color="#007bff", linewidth=2)
-        ax.plot(df['data_treino'], df['Cronica'], label="Crônica", color="#6c757d", ls="--")
-        ax.fill_between(df['data_treino'], df['Aguda'], alpha=0.1, color="#007bff")
-        ax.legend()
-        st.pyplot(fig)
-else:
-    st.info("Conecte ao Strava para começar.")
+        df_plot = df.copy()
+        df_plot['Aguda'] = df_plot['trimp_score'].rolling(7).mean()
+        df_plot['Cronica'] = df_plot['trimp_score'].rolling(28).mean()
+        st.line_chart(df_plot.set_index('data_treino')[['Aguda', 'Cronica']])
+
+        # 2. NOVO: Gráfico de Atividades Diárias
+        st.divider()
+        st.subheader("🗓️ Quantidade de Atividades por Dia")
+        
+        # Contamos quantas atividades existem por data
+        contagem_diaria = df['data_treino'].value_counts().sort_index()
+        
+        # Criamos um DataFrame para o gráfico de barras
+        df_barras = pd.DataFrame({
+            'Data': contagem_diaria.index,
+            'Quantidade': contagem_diaria.values
+        }).set_index('Data')
+        
+        st.bar_chart(df_barras, color="#ff4b4b") # Cor vermelha para combinar com o app
+    else:
+        st.info("Nenhuma atividade encontrada para este atleta.")
