@@ -86,9 +86,10 @@ def sincronizar_atividades(strava_id, access_token, nome_atleta):
                 supabase.table("atividades_fisicas").upsert(payload, on_conflict="id_atleta, data_treino").execute()
             
             recente = atividades[0]
+            dist_km = recente.get('distance', 0) / 1000
             msg = (f"🚀 *Treino Sincronizado!*\n\n"
                    f"👤 *Atleta:* {nome_atleta}\n"
-                   f"📏 *Distância:* {recente.get('distance',0)/1000:.2f} km")
+                   f"📏 *Distância:* {dist_km:.2f} km")
             enviar_whatsapp_twilio(msg)
             return True
     except: pass
@@ -99,13 +100,135 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
     st.session_state.user_info = None
 
-# --- LÓGICA DE CAPTURA DO STRAVA (CASO VOLTE PARA A TELA DE LOGIN) ---
+# --- LÓGICA DE CAPTURA DO STRAVA (CORRIGIDA) ---
 if "code" in st.query_params:
     code = st.query_params["code"]
     res_token = requests.post("https://www.strava.com/oauth/token", data={
         "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
         "code": code, "grant_type": "authorization_code"
     }).json()
+    
     if 'access_token' in res_token:
-        u_strava = {"strava_id": res_token['athlete']['id'], "nome": res_token['athlete']['firstname'], "access_token": res_token['access_token']}
+        u_strava = {
+            "strava_id": res_token['athlete']['id'], 
+            "nome": res_token['athlete']['firstname'], 
+            "access_token": res_token['access_token']
+        }
+        # CORREÇÃO DO ERRO DE SINTAXE AQUI:
         supabase.table("usuarios").upsert(u_strava).execute()
+        
+        sincronizar_atividades(u_strava["strava_id"], u_strava["access_token"], u_strava["nome"])
+        st.query_params.clear()
+        st.rerun()
+
+# --- INTERFACE: LOGIN / CADASTRO ---
+if not st.session_state.logado:
+    st.markdown("""
+        <style>
+        div.stButton > button:first-child { 
+            background-color: #007bff; 
+            color: white; 
+            border: none; 
+            font-weight: bold;
+            border-radius: 8px;
+            height: 45px;
+        }
+        div.stButton > button:first-child:hover { background-color: #0056b3; color: white; }
+        
+        .main-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .runner-icon { font-size: 40px; color: #ff4b4b; }
+        .title-text { font-size: 32px; font-weight: bold; color: #31333F; }
+        
+        /* Ajuste das Abas conforme imagem */
+        .stTabs [data-baseweb="tab-highlight"] { background-color: #ff4b4b; }
+        </style>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 1.3, 1])
+    with col2:
+        st.markdown("""
+            <div class='main-header'>
+                <span class='runner-icon'>🏃‍♂️</span>
+                <span class='title-text'>Elite Performance</span>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        tab1, tab2 = st.tabs(["Entrar", "Criar Conta"])
+        with tab1:
+            e = st.text_input("Email", key="l_email")
+            s = st.text_input("Senha", type="password", key="l_senha")
+            if st.button("Acessar Painel", use_container_width=True):
+                u = validar_login(e, s)
+                if u:
+                    st.session_state.logado = True
+                    st.session_state.user_info = u
+                    st.rerun()
+                else: st.error("E-mail ou senha incorretos.")
+        with tab2:
+            n_c = st.text_input("Nome")
+            e_c = st.text_input("E-mail")
+            t_c = st.text_input("WhatsApp (Ex: 5511999999999)")
+            s_c = st.text_input("Senha", type="password")
+            if st.button("Cadastrar e Entrar", use_container_width=True):
+                if n_c and e_c and t_c and s_c:
+                    if cadastrar_usuario(n_c, e_c, s_c, t_c):
+                        u_novo = validar_login(e_c, s_c)
+                        if u_novo:
+                            st.session_state.logado = True
+                            st.session_state.user_info = u_novo
+                            st.rerun()
+                    else: st.error("Erro ao cadastrar.")
+    st.stop()
+
+# --- DASHBOARD PRINCIPAL ---
+st.sidebar.markdown(f"### 👤 {st.session_state.user_info['nome']}")
+if st.sidebar.button("Sair"):
+    st.session_state.logado = False
+    st.rerun()
+
+auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
+st.sidebar.link_button("🟠 Conectar ao Strava", auth_url)
+
+usuarios = supabase.table("usuarios").select("*").execute()
+if usuarios.data:
+    opcoes = {u['nome']: u['strava_id'] for u in usuarios.data}
+    nome_sel = st.sidebar.selectbox("Selecionar Atleta", list(opcoes.keys()))
+    atleta_id = opcoes[nome_sel]
+    token_atleta = next(u['access_token'] for u in usuarios.data if u['strava_id'] == atleta_id)
+
+    if st.sidebar.button("🔄 Sincronizar Agora"):
+        if sincronizar_atividades(atleta_id, token_atleta, nome_sel):
+            st.sidebar.success("Dados atualizados!")
+            st.rerun()
+
+    st.title("📊 Painel de Performance")
+    res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", int(atleta_id)).execute()
+    if res_atv.data:
+        df = pd.DataFrame(res_atv.data)
+        df['data_treino'] = pd.to_datetime(df['data_treino'])
+        df = df.sort_values('data_treino')
+        
+        st.subheader("📈 Carga Aguda (7d) vs Crônica (28d)")
+        df['Aguda'] = df['trimp_score'].rolling(7).mean()
+        df['Cronica'] = df['trimp_score'].rolling(28).mean()
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(df['data_treino'], df['Aguda'], label="Aguda", color="#007bff", linewidth=2)
+        ax.plot(df['data_treino'], df['Cronica'], label="Crônica", color="#6c757d", ls="--")
+        ax.fill_between(df['data_treino'], df['Aguda'], alpha=0.1, color="#007bff")
+        ax.legend()
+        st.pyplot(fig)
+
+        st.divider()
+        st.subheader("📅 Volume de Treino Semanal (km)")
+        df_sem = df.resample('W-MON', on='data_treino')['distancia'].sum().reset_index()
+        fig2, ax2 = plt.subplots(figsize=(10, 3))
+        ax2.bar(df_sem['data_treino'].dt.strftime('%d/%m'), df_sem['distancia'], color='#007bff')
+        st.pyplot(fig2)
+else:
+    st.info("Conecte ao Strava para começar a visualizar os dados.")
