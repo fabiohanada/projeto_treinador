@@ -108,4 +108,4 @@ if "code" in st.query_params:
     }).json()
     if 'access_token' in res_token:
         u_strava = {"strava_id": res_token['athlete']['id'], "nome": res_token['athlete']['firstname'], "access_token": res_token['access_token']}
-        supabase.table("usuarios").upsert(u_strava
+        supabase.table("usuarios").upsert(u_strava).execute()
