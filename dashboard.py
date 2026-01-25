@@ -6,48 +6,63 @@ from supabase import create_client
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 from datetime import datetime
-from twilio.rest import Client # Certifique-se que 'twilio' está no requirements.txt
+from twilio.rest import Client
 
-# 1. Configurações e Conexão
+# 1. Configurações Iniciais
 load_dotenv()
 st.set_page_config(page_title="Elite Performance Dashboard", layout="wide")
 
-# Conectar ao Supabase
-url = os.getenv("SUPABASE_URL")
-key = os.getenv("SUPABASE_KEY")
+# Função para obter segredos de forma segura (Secrets ou Env)
+def get_secret(key):
+    return st.secrets.get(key) or os.getenv(key)
+
+# Conexões
+url = get_secret("SUPABASE_URL")
+key = get_secret("SUPABASE_KEY")
 supabase = create_client(url, key)
 
-# Credenciais Strava
-CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
-CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
+CLIENT_ID = get_secret("STRAVA_CLIENT_ID")
+CLIENT_SECRET = get_secret("STRAVA_CLIENT_SECRET")
 REDIRECT_URI = "https://seu-treino-app.streamlit.app" 
 
-# --- FUNÇÃO DE ENVIO DE SMS (TWILIO) ---
-def enviar_aviso_twilio(mensagem):
+# --- FUNÇÃO DE ENVIO DE WHATSAPP (COM DIAGNÓSTICO) ---
+def enviar_whatsapp_twilio(mensagem):
     try:
-        sid = os.getenv("TWILIO_ACCOUNT_SID")
-        token = os.getenv("TWILIO_AUTH_TOKEN")
-        phone_from = os.getenv("TWILIO_PHONE_NUMBER")
-        phone_to = os.getenv("MY_PHONE_NUMBER")
+        sid = get_secret("TWILIO_ACCOUNT_SID")
+        token = get_secret("TWILIO_AUTH_TOKEN")
+        phone_from = get_secret("TWILIO_PHONE_NUMBER")
+        phone_to = get_secret("MY_PHONE_NUMBER")
         
-        if sid and token:
-            client = Client(sid, token)
-            message = client.messages.create(
-                body=mensagem,
-                from_=phone_from,
-                to=phone_to
-            )
+        if not all([sid, token, phone_from, phone_to]):
+            st.error("❌ Credenciais do Twilio incompletas nos Secrets.")
+            return False
+
+        client = Client(sid, token)
+        
+        # Garante o formato 'whatsapp:+number'
+        p_from = f"whatsapp:{phone_from.replace('whatsapp:', '')}"
+        p_to = f"whatsapp:{phone_to.replace('whatsapp:', '')}"
+
+        message = client.messages.create(
+            body=mensagem,
+            from_=p_from,
+            to=p_to
+        )
+        
+        if message.sid:
+            st.toast(f"✅ WhatsApp enviado! Status: {message.status}", icon="📲")
             return True
     except Exception as e:
-        st.error(f"Erro ao enviar SMS: {e}")
-    return False
+        st.error(f"❌ Erro no Twilio: {e}")
+        return False
 
-# --- FUNÇÃO DE SINCRONIZAÇÃO ---
-def sincronizar_atividades(strava_id, access_token):
+# --- FUNÇÃO DE SINCRONIZAÇÃO DE ATIVIDADES ---
+def sincronizar_atividades(strava_id, access_token, nome_atleta):
     url_atividades = "https://www.strava.com/api/v3/athlete/activities"
     headers = {'Authorization': f'Bearer {access_token}'}
     try:
-        atividades = requests.get(url_atividades, headers=headers, params={'per_page': 5}).json()
+        atividades = requests.get(url_atividades, headers=headers, params={'per_page': 10}).json()
+        
         if isinstance(atividades, list):
             for atividade in atividades:
                 payload = {
@@ -58,17 +73,20 @@ def sincronizar_atividades(strava_id, access_token):
                     "duracao": int(atividade['moving_time'] / 60),
                     "tipo_esporte": atividade['type']
                 }
-                # Ao fazer upsert, o banco ignora se já existir
+                # Upsert evita duplicados baseados na constraint (id_atleta, data_treino)
                 supabase.table("atividades_fisicas").upsert(payload, on_conflict="id_atleta, data_treino").execute()
             
-            # EXEMPLO: Enviar SMS ao terminar a sincronização
-            enviar_aviso_twilio(f"🚀 Treinos de {strava_id} sincronizados no Dashboard!")
+            # Notificação de sucesso
+            enviar_whatsapp_twilio(f"✅ *Elite Performance*\nTreinos de *{nome_atleta}* atualizados com sucesso!")
             return True
+        else:
+            st.error("Não foi possível obter a lista de atividades do Strava.")
+            return False
     except Exception as e:
         st.error(f"Erro na sincronização: {e}")
-    return False
+        return False
 
-# --- LÓGICA DE LOGIN ---
+# --- LÓGICA DE LOGIN STRAVA ---
 if "code" in st.query_params:
     code = st.query_params["code"]
     try:
@@ -76,6 +94,7 @@ if "code" in st.query_params:
             "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
             "code": code, "grant_type": "authorization_code"
         }).json()
+        
         if 'access_token' in response:
             user_data = {
                 "strava_id": response['athlete']['id'],
@@ -85,32 +104,35 @@ if "code" in st.query_params:
                 "expires_at": response['expires_at']
             }
             supabase.table("usuarios").upsert(user_data).execute()
-            sincronizar_atividades(user_data["strava_id"], user_data["access_token"])
+            sincronizar_atividades(user_data["strava_id"], user_data["access_token"], user_data["nome"])
+            st.success("Atleta conectado!")
             st.rerun()
     except Exception as e:
         st.error(f"Erro no login: {e}")
 
 # --- BARRA LATERAL ---
-st.sidebar.title("🚀 Menu")
+st.sidebar.title("🚀 Elite Performance")
 auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
 st.sidebar.link_button("🟠 Conectar Strava", auth_url)
 
 atleta_id = None
 token_atleta = None
+nome_selecionado = ""
+
 try:
     usuarios = supabase.table("usuarios").select("*").execute()
     if usuarios.data:
         opcoes = {u['nome']: u['strava_id'] for u in usuarios.data}
-        nome_sel = st.sidebar.selectbox("👤 Atleta", list(opcoes.keys()))
-        atleta_id = opcoes[nome_sel]
+        nome_selecionado = st.sidebar.selectbox("👤 Selecionar Atleta", list(opcoes.keys()))
+        atleta_id = opcoes[nome_selecionado]
         token_atleta = next(u['access_token'] for u in usuarios.data if u['strava_id'] == atleta_id)
-except:
-    pass
+except Exception:
+    st.sidebar.warning("Nenhum atleta cadastrado.")
 
 if atleta_id and st.sidebar.button("🔄 Sincronizar Agora"):
-    if sincronizar_atividades(atleta_id, token_atleta):
-        st.sidebar.success("Atualizado!")
-        st.rerun()
+    with st.spinner("Sincronizando..."):
+        if sincronizar_atividades(atleta_id, token_atleta, nome_selecionado):
+            st.rerun()
 
 # --- ÁREA PRINCIPAL ---
 st.title("📊 Painel de Controle de Carga")
@@ -123,12 +145,12 @@ if atleta_id:
         df['data_treino'] = pd.to_datetime(df['data_treino'])
         df = df.sort_values('data_treino')
 
-        # Cálculos ACWR
+        # Cálculos de Carga ACWR
         df['Aguda'] = df['trimp_score'].rolling(window=7, min_periods=1).mean()
         df['Cronica'] = df['trimp_score'].rolling(window=28, min_periods=1).mean()
         df['ACWR'] = df['Aguda'] / df['Cronica']
 
-        # Métricas
+        # Métricas em colunas
         m1, m2, m3 = st.columns(3)
         ultimo_acwr = df['ACWR'].iloc[-1]
         
@@ -137,20 +159,29 @@ if atleta_id:
         with m2:
             status = "✅ Seguro" if 0.8 <= ultimo_acwr <= 1.3 else "⚠️ Risco"
             st.metric("Status", status)
-            # AVISO SMS AUTOMÁTICO DE RISCO
-            if ultimo_acwr > 1.3 and st.sidebar.button("Enviar Alerta de Risco"):
-                enviar_aviso_twilio(f"🚨 ALERTA: Carga Crítica ({ultimo_acwr:.2f}) para {nome_sel}. Risco de lesão!")
-
         with m3:
             st.metric("Total Treinos", len(df))
 
-        # Gráfico
-        fig_carga, ax = plt.subplots(figsize=(12, 5))
-        ax.plot(df['data_treino'], df['Aguda'], label="Carga Aguda", color="#1E90FF")
-        ax.plot(df['data_treino'], df['Cronica'], label="Carga Crônica", color="#FF4500", ls="--")
-        ax.fill_between(df['data_treino'], 0.8 * df['Cronica'], 1.3 * df['Cronica'], color='green', alpha=0.1)
-        ax.legend()
-        st.pyplot(fig_carga)
+        # Alerta Automático via Interface
+        if ultimo_acwr > 1.3:
+            st.error(f"🚨 Atenção: {nome_selecionado} está em zona de risco de lesão!")
+            if st.button("Enviar Alerta Urgente via WhatsApp"):
+                enviar_whatsapp_twilio(f"🚨 *ALERTA CRÍTICO*: {nome_selecionado}, sua carga de treino ({ultimo_acwr:.2f}) indica alto risco de lesão. Descanse!")
 
+        # Gráfico de Carga
+        st.subheader("Gráfico de Evolução (TL)")
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.plot(df['data_treino'], df['Aguda'], label="Carga Aguda (7d)", color="#1E90FF", lw=2)
+        ax.plot(df['data_treino'], df['Cronica'], label="Carga Crônica (28d)", color="#FF4500", ls="--")
+        ax.fill_between(df['data_treino'], 0.8 * df['Cronica'], 1.3 * df['Cronica'], color='green', alpha=0.1, label="Sweet Spot")
+        ax.set_ylabel("Carga (Score)")
+        ax.legend()
+        plt.xticks(rotation=45)
+        st.pyplot(fig)
+        
+        with st.expander("Ver dados brutos"):
+            st.write(df.tail(10))
     else:
-        st.info("Sem atividades. Clique em 'Sincronizar Agora'.")
+        st.info("Nenhum dado encontrado para este atleta. Clique em sincronizar.")
+else:
+    st.info("Aguardando seleção de atleta na barra lateral.")
