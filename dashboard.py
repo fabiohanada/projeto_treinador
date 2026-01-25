@@ -11,7 +11,7 @@ import hashlib
 
 # 1. Configurações Iniciais
 load_dotenv()
-st.set_page_config(page_title="Elite Performance Dashboard", layout="wide")
+st.set_page_config(page_title="Seu Treino App", layout="wide")
 
 def get_secret(key):
     try:
