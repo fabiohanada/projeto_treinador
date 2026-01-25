@@ -26,9 +26,10 @@ supabase = create_client(url, key)
 
 CLIENT_ID = get_secret("STRAVA_CLIENT_ID")
 CLIENT_SECRET = get_secret("STRAVA_CLIENT_SECRET")
+# AJUSTE: Use a URL real do seu app aqui
 REDIRECT_URI = "https://seu-treino-app.streamlit.app" 
 
-# --- FUNÇÕES DE SEGURANÇA E LOGIN ---
+# --- FUNÇÕES DE SEGURANÇA ---
 def hash_senha(senha):
     return hashlib.sha256(str.encode(senha)).hexdigest()
 
@@ -100,7 +101,7 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
     st.session_state.user_info = None
 
-# --- LÓGICA DE CAPTURA DO STRAVA (CORRIGIDA) ---
+# --- CAPTURA RETORNO DO STRAVA (NA MESMA ABA) ---
 if "code" in st.query_params:
     code = st.query_params["code"]
     res_token = requests.post("https://www.strava.com/oauth/token", data={
@@ -114,10 +115,10 @@ if "code" in st.query_params:
             "nome": res_token['athlete']['firstname'], 
             "access_token": res_token['access_token']
         }
-        # CORREÇÃO DO ERRO DE SINTAXE AQUI:
         supabase.table("usuarios").upsert(u_strava).execute()
-        
         sincronizar_atividades(u_strava["strava_id"], u_strava["access_token"], u_strava["nome"])
+        
+        # Limpa os parâmetros e recarrega para sumir o código da URL
         st.query_params.clear()
         st.rerun()
 
@@ -126,26 +127,12 @@ if not st.session_state.logado:
     st.markdown("""
         <style>
         div.stButton > button:first-child { 
-            background-color: #007bff; 
-            color: white; 
-            border: none; 
-            font-weight: bold;
-            border-radius: 8px;
-            height: 45px;
+            background-color: #007bff; color: white; border: none; font-weight: bold; border-radius: 8px; height: 45px;
         }
         div.stButton > button:first-child:hover { background-color: #0056b3; color: white; }
-        
-        .main-header {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
+        .main-header { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; }
         .runner-icon { font-size: 40px; color: #ff4b4b; }
         .title-text { font-size: 32px; font-weight: bold; color: #31333F; }
-        
-        /* Ajuste das Abas conforme imagem */
         .stTabs [data-baseweb="tab-highlight"] { background-color: #ff4b4b; }
         </style>
     """, unsafe_allow_html=True)
@@ -186,15 +173,24 @@ if not st.session_state.logado:
                     else: st.error("Erro ao cadastrar.")
     st.stop()
 
-# --- DASHBOARD PRINCIPAL ---
+# --- DASHBOARD (SÓ ACESSÍVEL LOGADO) ---
 st.sidebar.markdown(f"### 👤 {st.session_state.user_info['nome']}")
+
+# BOTÃO STRAVA COM TARGET SELF (NÃO ABRE NOVA ABA)
+auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
+st.sidebar.markdown(f"""
+    <a href="{auth_url}" target="_self" style="text-decoration: none;">
+        <div style="background-color: #FC4C02; color: white; text-align: center; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 10px;">
+            🟠 Conectar ao Strava
+        </div>
+    </a>
+""", unsafe_allow_html=True)
+
 if st.sidebar.button("Sair"):
     st.session_state.logado = False
     st.rerun()
 
-auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
-st.sidebar.link_button("🟠 Conectar ao Strava", auth_url)
-
+# --- EXIBIÇÃO DE DADOS ---
 usuarios = supabase.table("usuarios").select("*").execute()
 if usuarios.data:
     opcoes = {u['nome']: u['strava_id'] for u in usuarios.data}
@@ -204,7 +200,7 @@ if usuarios.data:
 
     if st.sidebar.button("🔄 Sincronizar Agora"):
         if sincronizar_atividades(atleta_id, token_atleta, nome_sel):
-            st.sidebar.success("Dados atualizados!")
+            st.sidebar.success("Atualizado!")
             st.rerun()
 
     st.title("📊 Painel de Performance")
@@ -214,7 +210,7 @@ if usuarios.data:
         df['data_treino'] = pd.to_datetime(df['data_treino'])
         df = df.sort_values('data_treino')
         
-        st.subheader("📈 Carga Aguda (7d) vs Crônica (28d)")
+        st.subheader("📈 Carga Aguda vs Crônica")
         df['Aguda'] = df['trimp_score'].rolling(7).mean()
         df['Cronica'] = df['trimp_score'].rolling(28).mean()
         fig, ax = plt.subplots(figsize=(10, 4))
@@ -223,12 +219,5 @@ if usuarios.data:
         ax.fill_between(df['data_treino'], df['Aguda'], alpha=0.1, color="#007bff")
         ax.legend()
         st.pyplot(fig)
-
-        st.divider()
-        st.subheader("📅 Volume de Treino Semanal (km)")
-        df_sem = df.resample('W-MON', on='data_treino')['distancia'].sum().reset_index()
-        fig2, ax2 = plt.subplots(figsize=(10, 3))
-        ax2.bar(df_sem['data_treino'].dt.strftime('%d/%m'), df_sem['distancia'], color='#007bff')
-        st.pyplot(fig2)
 else:
-    st.info("Conecte ao Strava para começar a visualizar os dados.")
+    st.info("Conecte ao Strava para carregar os treinos.")
