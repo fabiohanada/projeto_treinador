@@ -160,3 +160,8 @@ if not st.session_state.logado:
             s_c = st.text_input("Sua Senha", type="password")
             if st.button("Criar Conta", use_container_width=True):
                 if n_c and e_c and t_c and s_c:
+                    # ESTAS LINHAS ABAIXO DEVEM TER UM "TAB" A MAIS
+                    if cadastrar_usuario(n_c, e_c, s_c, t_c):
+                        st.success("Conta criada! Faça login.")
+                    else:
+                        st.error("Erro ao criar conta.")
