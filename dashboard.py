@@ -39,7 +39,7 @@ def validar_login(email, senha):
     except:
         return None
 
-# --- FUNÇÃO DE SINCRONIZAÇÃO (PODE SER CHAMADA MANUAL OU AUTOMÁTICA) ---
+# --- FUNÇÃO DE SINCRONIZAÇÃO ---
 def sincronizar_dados(strava_id, access_token):
     url_atv = "https://www.strava.com/api/v3/athlete/activities"
     headers = {'Authorization': f'Bearer {access_token}'}
@@ -113,7 +113,6 @@ if not st.session_state.logado:
 # --- DASHBOARD LOGADO ---
 usuarios = supabase.table("usuarios").select("*").execute()
 
-# Sincronização Automática ao Carregar
 if "auto_sync_done" not in st.session_state and usuarios.data:
     for u in usuarios.data:
         sincronizar_dados(u['strava_id'], u['access_token'])
@@ -122,7 +121,6 @@ if "auto_sync_done" not in st.session_state and usuarios.data:
 # --- SIDEBAR ---
 st.sidebar.markdown(f"### 👤 {st.session_state.user_info['nome']}")
 
-# Botão Strava Laranja (Normal)
 auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
 st.sidebar.markdown(f"""
     <a href="{auth_url}" target="_self" style="text-decoration: none;">
@@ -136,11 +134,8 @@ if usuarios.data:
     opcoes = {u['nome']: u['strava_id'] for u in usuarios.data}
     nome_sel = st.sidebar.selectbox("Selecionar Atleta", list(opcoes.keys()))
     atleta_id = opcoes[nome_sel]
-    
-    # Busca o token do atleta selecionado para o botão manual
     token_atleta = next(u['access_token'] for u in usuarios.data if u['strava_id'] == atleta_id)
     
-    # REINSERÇÃO DO BOTÃO SINCRONIZAR
     if st.sidebar.button("🔄 Sincronizar Agora", use_container_width=True):
         with st.spinner("Atualizando dados..."):
             if sincronizar_dados(atleta_id, token_atleta):
@@ -152,7 +147,7 @@ if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
     st.session_state.logado = False
     st.rerun()
 
-# --- CONTEÚDO PRINCIPAL ---
+# --- CONTEÚDO PRINCIPAL (GRÁFICOS LADO A LADO) ---
 if usuarios.data:
     st.title(f"📊 Painel: {nome_sel}")
     res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", int(atleta_id)).execute()
@@ -161,19 +156,22 @@ if usuarios.data:
         df = pd.DataFrame(res_atv.data)
         df['data_treino'] = pd.to_datetime(df['data_treino']).dt.date
         df = df.sort_values('data_treino')
-        
-        # 1. Gráfico de Carga Aguda vs Crônica
-        st.subheader("📈 Carga Aguda vs Crônica")
-        df_plot = df.copy()
-        df_plot['Aguda'] = df_plot['trimp_score'].rolling(7).mean()
-        df_plot['Cronica'] = df_plot['trimp_score'].rolling(28).mean()
-        st.line_chart(df_plot.set_index('data_treino')[['Aguda', 'Cronica']])
 
-        # 2. Gráfico de Atividades Diárias
-        st.divider()
-        st.subheader("🗓️ Quantidade de Atividades por Dia")
-        contagem_diaria = df['data_treino'].value_counts().sort_index()
-        df_barras = pd.DataFrame({'Data': contagem_diaria.index, 'Quantidade': contagem_diaria.values}).set_index('Data')
-        st.bar_chart(df_barras, color="#ff4b4b")
+        # Criando as duas colunas
+        col_esq, col_dir = st.columns(2)
+
+        with col_esq:
+            st.subheader("🗓️ Atividades por Dia")
+            contagem_diaria = df['data_treino'].value_counts().sort_index()
+            df_barras = pd.DataFrame({'Data': contagem_diaria.index, 'Quantidade': contagem_diaria.values}).set_index('Data')
+            st.bar_chart(df_barras, color="#ff4b4b")
+
+        with col_dir:
+            st.subheader("📈 Carga Aguda vs Crônica")
+            df_plot = df.copy()
+            df_plot['Aguda'] = df_plot['trimp_score'].rolling(7).mean()
+            df_plot['Cronica'] = df_plot['trimp_score'].rolling(28).mean()
+            # Usando line_chart para manter o padrão visual do Streamlit
+            st.line_chart(df_plot.set_index('data_treino')[['Aguda', 'Cronica']])
     else:
-        st.info("Conecte ao Strava para carregar os treinos.")
+        st.info("Nenhum dado encontrado. Conecte ao Strava para começar.")
