@@ -79,10 +79,10 @@ except:
 # --- CONTEÚDO PRINCIPAL ---
 st.title("🚀 Painel de Performance de Elite")
 
-def carregar_dados(atleta_id):
-    if not atleta_id:
+def carregar_dados(id_atleta):
+    if not id_atleta:
         return pd.DataFrame()
-    response = supabase.table("atividades_fisicas").select("*").eq("atleta_id", atleta_id).execute()
+    response = supabase.table("atividades_fisicas").select("*").eq("id_atleta", id_atleta).execute()
     if not response.data:
         return pd.DataFrame()
     df = pd.DataFrame(response.data)
