@@ -19,9 +19,40 @@ supabase = create_client(url, key)
 # 3. Credenciais do Strava
 CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
 CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
+# AJUSTE: Certifique-se que esta URL está igual à cadastrada no Strava API
 REDIRECT_URI = "https://seu-treino-app.streamlit.app" 
 
-# --- LÓGICA DE AUTENTICAÇÃO STRAVA ---
+# --- FUNÇÃO PARA BUSCAR DADOS DO STRAVA E SALVAR NO BANCO ---
+def sincronizar_atividades(strava_id, access_token):
+    url_atividades = "https://www.strava.com/api/v3/athlete/activities"
+    headers = {'Authorization': f'Bearer {access_token}'}
+    params = {'per_page': 50} # Puxa as últimas 50 atividades
+    
+    try:
+        response = requests.get(url_atividades, headers=headers, params=params).json()
+        
+        if isinstance(response, list):
+            for atividade in response:
+                # Cálculo de carga simples: moving_time em minutos
+                # Você pode melhorar essa fórmula depois
+                pontos_estimados = atividade['moving_time'] / 60
+                
+                dados_treino = {
+                    "id_atleta": int(strava_id),
+                    "dados_treino": atividade['start_date_local'],
+                    "pontos": pontos_estimados,
+                    "duracao_min": atividade['moving_time'] / 60,
+                    "tipo": atividade['type'],
+                    "nome_atividade": atividade['name']
+                }
+                # Upsert usa a data/hora como chave única para não duplicar
+                supabase.table("atividades_fisicas").upsert(dados_treino).execute()
+            return True
+    except Exception as e:
+        st.error(f"Erro ao sincronizar: {e}")
+    return False
+
+# --- LÓGICA DE AUTENTICAÇÃO STRAVA (OAUTH2) ---
 if "code" in st.query_params:
     code = st.query_params["code"]
     try:
@@ -41,7 +72,11 @@ if "code" in st.query_params:
                 "expires_at": response['expires_at']
             }
             supabase.table("usuarios").upsert(user_data).execute()
-            st.success(f"✅ Atleta {response['athlete']['firstname']} conectado!")
+            
+            # Sincroniza logo após o primeiro login
+            sincronizar_atividades(user_data["strava_id"], user_data["access_token"])
+            
+            st.success(f"✅ Atleta {user_data['nome']} conectado e dados sincronizados!")
             st.rerun()
     except Exception as e:
         st.error(f"Erro na autenticação: {e}")
@@ -60,101 +95,83 @@ auth_url = (
 st.sidebar.link_button("🟠 Conectar Novo Atleta", auth_url)
 st.sidebar.divider()
 
-# Seleção de Atleta do Banco
+# Seleção de Atleta
 atleta_id_selecionado = None
 nome_atleta = ""
+dados_usuario = None
 
 try:
-    resp_users = supabase.table("usuarios").select("nome, strava_id").execute()
+    resp_users = supabase.table("usuarios").select("*").execute()
     if resp_users.data:
         dict_usuarios = {u['nome']: u['strava_id'] for u in resp_users.data}
         nome_atleta = st.sidebar.selectbox("👤 Selecionar Atleta", list(dict_usuarios.keys()))
         atleta_id_selecionado = dict_usuarios[nome_atleta]
+        # Pega os dados do usuário selecionado para o refresh
+        dados_usuario = next(u for u in resp_users.data if u['strava_id'] == atleta_id_selecionado)
 except Exception as e:
-    st.sidebar.error(f"Erro ao carregar lista de atletas: {e}")
+    st.sidebar.error("Erro ao carregar atletas.")
 
-# --- FUNÇÃO DE DADOS (CORREÇÃO DO TIPO BIGINT) ---
-def carregar_dados(id_do_atleta):
-    if not id_do_atleta:
-        return pd.DataFrame()
-    
+# Botão de Atualização Manual
+if atleta_id_selecionado and dados_usuario:
+    if st.sidebar.button("🔄 Atualizar Dados do Strava"):
+        with st.sidebar.spinner("Buscando atividades..."):
+            sucesso = sincronizar_atividades(atleta_id_selecionado, dados_usuario['access_token'])
+            if sucesso:
+                st.sidebar.success("Dados atualizados!")
+                st.rerun()
+
+# --- FUNÇÃO DE CARREGAMENTO DE DADOS DO BANCO ---
+def carregar_dados_banco(id_do_atleta):
     try:
-        # CONVERSÃO CRUCIAL: O banco espera um BigInt (número), não texto.
-        id_numerico = int(id_do_atleta)
-        
-        res = supabase.table("atividades_fisicas").select("*").eq("id_atleta", id_numerico).execute()
-        
+        res = supabase.table("atividades_fisicas").select("*").eq("id_atleta", int(id_do_atleta)).execute()
         if not res.data:
             return pd.DataFrame()
         
         df = pd.DataFrame(res.data)
-        
-        # Mapeando a coluna 'pontos'
-        if 'pontos' in df.columns:
-            df['trimp_score'] = pd.to_numeric(df['pontos'], errors='coerce')
-        
-        # Identificando a coluna de data
-        col_data = 'dados_treino' if 'dados_treino' in df.columns else 'data_treino'
-        if col_data in df.columns:
-            df['data_treino_limpa'] = pd.to_datetime(df[col_data])
-            return df.sort_values('data_treino_limpa')
-            
-        return pd.DataFrame()
+        df['data_treino_limpa'] = pd.to_datetime(df['dados_treino'])
+        df['trimp_score'] = pd.to_numeric(df['pontos'], errors='coerce')
+        return df.sort_values('data_treino_limpa')
     except Exception as e:
-        # Se der erro aqui, saberemos se ainda é problema de tipo
-        st.error(f"Erro na consulta SQL: {e}")
+        st.error(f"Erro ao ler banco: {e}")
         return pd.DataFrame()
 
 # --- ÁREA PRINCIPAL ---
 st.title("📊 Painel de Controle de Carga")
 
 if atleta_id_selecionado:
-    df_treinos = carregar_dados(atleta_id_selecionado)
+    df_treinos = carregar_dados_banco(atleta_id_selecionado)
 
     if not df_treinos.empty:
-        # --- LINHA DE DIAGNÓSTICO (Remova após funcionar) ---
-        # st.write("Colunas encontradas:", df_treinos.columns.tolist())
-        # st.write(df_treinos.head()) 
+        # Cálculos de Carga (ACWR)
+        df_treinos['Carga_Aguda'] = df_treinos['trimp_score'].rolling(window=7, min_periods=1).mean()
+        df_treinos['Carga_Cronica'] = df_treinos['trimp_score'].rolling(window=28, min_periods=1).mean()
+        df_treinos['ACWR'] = df_treinos['Carga_Aguda'] / df_treinos['Carga_Cronica']
 
-        # Verificação e Limpeza da coluna de pontos
-        # Altere 'pontos' abaixo para o nome EXATO que aparece no seu banco
-        coluna_esforço = 'pontos' 
+        # Métricas
+        c1, c2, c3 = st.columns(3)
+        ultimo_acwr = df_treinos['ACWR'].iloc[-1]
         
-        if coluna_esforço in df_treinos.columns:
-            # Garante que os dados são números e remove linhas sem valor
-            df_treinos['trimp_score'] = pd.to_numeric(df_treinos[coluna_esforço], errors='coerce')
-            df_treinos = df_treinos.dropna(subset=['trimp_score'])
+        with c1:
+            st.metric("ACWR Atual", f"{ultimo_acwr:.2f}")
+        with c2:
+            status = "✅ Seguro" if 0.8 <= ultimo_acwr <= 1.3 else "⚠️ Risco"
+            st.metric("Status", status)
+        with c3:
+            st.metric("Total de Treinos", len(df_treinos))
 
-        if 'trimp_score' in df_treinos.columns and len(df_treinos) > 0:
-            # Cálculos de Carga
-            df_treinos['Carga_Aguda'] = df_treinos['trimp_score'].rolling(window=7, min_periods=1).mean()
-            df_treinos['Carga_Cronica'] = df_treinos['trimp_score'].rolling(window=28, min_periods=1).mean()
-            df_treinos['ACWR'] = df_treinos['Carga_Aguda'] / df_treinos['Carga_Cronica']
-
-            # Métricas
-            c1, c2, c3 = st.columns(3)
-            ultimo_acwr = df_treinos['ACWR'].iloc[-1]
-            
-            with c1:
-                st.metric("ACWR Atual", f"{ultimo_acwr:.2f}")
-            with c2:
-                status = "✅ Seguro" if 0.8 <= ultimo_acwr <= 1.3 else "⚠️ Risco"
-                st.metric("Status", status)
-            with c3:
-                st.metric("Treinos Analisados", len(df_treinos))
-
-            # Gráfico
-            st.subheader(f"Evolução de Carga: {nome_atleta}")
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(df_treinos['data_treino_limpa'], df_treinos['Carga_Aguda'], label="Aguda (7d)", color="#1E90FF")
-            ax.plot(df_treinos['data_treino_limpa'], df_treinos['Carga_Cronica'], label="Crônica (28d)", color="#FF4500", linestyle="--")
-            ax.fill_between(df_treinos['data_treino_limpa'], 0.8 * df_treinos['Carga_Cronica'], 1.3 * df_treinos['Carga_Cronica'], color='green', alpha=0.1)
-            ax.legend()
-            st.pyplot(fig)
-        else:
-            st.error(f"A coluna '{coluna_esforço}' existe, mas parece estar vazia no banco de dados.")
-            st.write("Dados recebidos:", df_treinos)
+        # Gráfico
+        st.subheader(f"Evolução: {nome_atleta}")
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(df_treinos['data_treino_limpa'], df_treinos['Carga_Aguda'], label="Aguda (Fadiga 7d)", color="#1E90FF")
+        ax.plot(df_treinos['data_treino_limpa'], df_treinos['Carga_Cronica'], label="Crônica (Fitness 28d)", color="#FF4500", linestyle="--")
+        ax.fill_between(df_treinos['data_treino_limpa'], 0.8 * df_treinos['Carga_Cronica'], 1.3 * df_treinos['Carga_Cronica'], color='green', alpha=0.1)
+        ax.legend()
+        plt.xticks(rotation=45)
+        st.pyplot(fig)
+        
+        with st.expander("Ver atividades no banco"):
+            st.write(df_treinos[['data_treino_limpa', 'tipo', 'pontos']].tail(10))
     else:
-        st.info(f"Nenhuma atividade encontrada para {nome_atleta} no banco de dados.")
+        st.info(f"O atleta {nome_atleta} está conectado, mas não há atividades no banco. Clique em 'Atualizar Dados' na barra lateral.")
 else:
-    st.info("Aguardando seleção de atleta...")
+    st.info("Selecione um atleta para visualizar o desempenho.")
