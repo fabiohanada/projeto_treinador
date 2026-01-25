@@ -11,6 +11,7 @@ import hashlib
 
 # 1. Configurações Iniciais
 load_dotenv()
+# Título da aba do navegador atualizado
 st.set_page_config(page_title="Seu Treino App", layout="wide")
 
 def get_secret(key):
@@ -136,10 +137,11 @@ if not st.session_state.logado:
 
     col1, col2, col3 = st.columns([1, 1.3, 1])
     with col2:
+        # Título da tela de login atualizado
         st.markdown("""
             <div class='main-header'>
                 <span class='runner-icon'>🏃‍♂️</span>
-                <span class='title-text'>Elite Performance</span>
+                <span class='title-text'>Seu Treino App</span>
             </div>
         """, unsafe_allow_html=True)
         
@@ -171,11 +173,9 @@ if not st.session_state.logado:
     st.stop()
 
 # --- DASHBOARD (LOGADO) ---
-
-# 1. Informações do Perfil
 st.sidebar.markdown(f"### 👤 {st.session_state.user_info['nome']}")
 
-# 2. Conectar ao Strava (Mesma aba)
+# Conectar ao Strava
 auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
 st.sidebar.markdown(f"""
     <a href="{auth_url}" target="_self" style="text-decoration: none;">
@@ -185,7 +185,7 @@ st.sidebar.markdown(f"""
     </a>
 """, unsafe_allow_html=True)
 
-# 3. Seleção de Atleta e Sincronizar
+# Seleção de Atleta e Sincronizar
 usuarios = supabase.table("usuarios").select("*").execute()
 if usuarios.data:
     opcoes = {u['nome']: u['strava_id'] for u in usuarios.data}
@@ -198,7 +198,7 @@ if usuarios.data:
             st.sidebar.success("Atualizado!")
             st.rerun()
 
-# 4. Botão Sair (Agora posicionado abaixo de tudo)
+# Botão Sair
 st.sidebar.divider()
 if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
     st.session_state.logado = False
@@ -207,7 +207,8 @@ if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
 
 # --- CONTEÚDO PRINCIPAL ---
 if usuarios.data:
-    st.title("📊 Painel de Atividades")
+    # Título principal do Dashboard atualizado
+    st.title("📊 Painel Seu Treino App")
     res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", int(atleta_id)).execute()
     if res_atv.data:
         df = pd.DataFrame(res_atv.data)
