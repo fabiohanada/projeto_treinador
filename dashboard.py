@@ -39,6 +39,20 @@ def validar_login(email, senha):
     except:
         return None
 
+def cadastrar_usuario(nome, email, senha, telefone):
+    senha_hash = hash_senha(senha)
+    # Limpeza básica do telefone
+    tel_limpo = ''.join(filter(str.isdigit, telefone))
+    if not tel_limpo.startswith('+'):
+        tel_limpo = f"+{tel_limpo}"
+    
+    payload = {"nome": nome, "email": email, "senha": senha_hash, "telefone": tel_limpo}
+    try:
+        supabase.table("usuarios_app").insert(payload).execute()
+        return True
+    except:
+        return False
+
 # --- FUNÇÃO DE SINCRONIZAÇÃO ---
 def sincronizar_dados(strava_id, access_token):
     url_atv = "https://www.strava.com/api/v3/athlete/activities"
@@ -85,7 +99,7 @@ if "code" in st.query_params:
         st.query_params.clear()
         st.rerun()
 
-# --- INTERFACE: LOGIN ---
+# --- INTERFACE: LOGIN / CADASTRO ---
 if not st.session_state.logado:
     st.markdown("""
         <style>
@@ -93,26 +107,45 @@ if not st.session_state.logado:
         .main-header { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; }
         .runner-icon { font-size: 40px; color: #ff4b4b; }
         .title-text { font-size: 32px; font-weight: bold; color: #31333F; }
+        .stTabs [data-baseweb="tab-highlight"] { background-color: #ff4b4b; }
         </style>
     """, unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1, 1.3, 1])
     with col2:
         st.markdown("<div class='main-header'><span class='runner-icon'>🏃‍♂️</span><span class='title-text'>Seu Treino App</span></div>", unsafe_allow_html=True)
-        e = st.text_input("Email")
-        s = st.text_input("Senha", type="password")
-        if st.button("Acessar Painel", use_container_width=True):
-            u = validar_login(e, s)
-            if u:
-                st.session_state.logado = True
-                st.session_state.user_info = u
-                st.rerun()
-            else: st.error("Dados incorretos.")
+        
+        tab_login, tab_cadastro = st.tabs(["Entrar", "Criar Conta"])
+        
+        with tab_login:
+            e = st.text_input("Email", key="login_email")
+            s = st.text_input("Senha", type="password", key="login_pass")
+            if st.button("Acessar Painel", use_container_width=True):
+                u = validar_login(e, s)
+                if u:
+                    st.session_state.logado = True
+                    st.session_state.user_info = u
+                    st.rerun()
+                else: st.error("E-mail ou senha incorretos.")
+        
+        with tab_cadastro:
+            nome_c = st.text_input("Nome Completo")
+            email_c = st.text_input("E-mail de Cadastro")
+            tel_c = st.text_input("WhatsApp (Ex: 5511999999999)")
+            senha_c = st.text_input("Crie uma Senha", type="password")
+            
+            if st.button("Finalizar Cadastro", use_container_width=True):
+                if nome_c and email_c and tel_c and senha_c:
+                    if cadastrar_usuario(nome_c, email_c, senha_c, tel_c):
+                        st.success("Conta criada com sucesso! Faça login para continuar.")
+                    else: st.error("Erro ao cadastrar. E-mail já pode estar em uso.")
+                else: st.warning("Preencha todos os campos.")
     st.stop()
 
 # --- DASHBOARD LOGADO ---
 usuarios = supabase.table("usuarios").select("*").execute()
 
+# Sincronização Automática ao Abrir
 if "auto_sync_done" not in st.session_state and usuarios.data:
     for u in usuarios.data:
         sincronizar_dados(u['strava_id'], u['access_token'])
@@ -147,7 +180,7 @@ if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
     st.session_state.logado = False
     st.rerun()
 
-# --- CONTEÚDO PRINCIPAL (GRÁFICOS LADO A LADO) ---
+# --- CONTEÚDO PRINCIPAL (LADO A LADO) ---
 if usuarios.data:
     st.title(f"📊 Painel: {nome_sel}")
     res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", int(atleta_id)).execute()
@@ -157,7 +190,6 @@ if usuarios.data:
         df['data_treino'] = pd.to_datetime(df['data_treino']).dt.date
         df = df.sort_values('data_treino')
 
-        # Criando as duas colunas
         col_esq, col_dir = st.columns(2)
 
         with col_esq:
@@ -171,7 +203,6 @@ if usuarios.data:
             df_plot = df.copy()
             df_plot['Aguda'] = df_plot['trimp_score'].rolling(7).mean()
             df_plot['Cronica'] = df_plot['trimp_score'].rolling(28).mean()
-            # Usando line_chart para manter o padrão visual do Streamlit
             st.line_chart(df_plot.set_index('data_treino')[['Aguda', 'Cronica']])
     else:
-        st.info("Nenhum dado encontrado. Conecte ao Strava para começar.")
+        st.info("Conecte ao Strava para carregar os treinos.")
