@@ -6,25 +6,48 @@ from supabase import create_client
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 from datetime import datetime
+from twilio.rest import Client # Certifique-se que 'twilio' está no requirements.txt
 
 # 1. Configurações e Conexão
 load_dotenv()
 st.set_page_config(page_title="Elite Performance Dashboard", layout="wide")
 
+# Conectar ao Supabase
 url = os.getenv("SUPABASE_URL")
 key = os.getenv("SUPABASE_KEY")
 supabase = create_client(url, key)
 
+# Credenciais Strava
 CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
 CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
 REDIRECT_URI = "https://seu-treino-app.streamlit.app" 
+
+# --- FUNÇÃO DE ENVIO DE SMS (TWILIO) ---
+def enviar_aviso_twilio(mensagem):
+    try:
+        sid = os.getenv("TWILIO_ACCOUNT_SID")
+        token = os.getenv("TWILIO_AUTH_TOKEN")
+        phone_from = os.getenv("TWILIO_PHONE_NUMBER")
+        phone_to = os.getenv("MY_PHONE_NUMBER")
+        
+        if sid and token:
+            client = Client(sid, token)
+            message = client.messages.create(
+                body=mensagem,
+                from_=phone_from,
+                to=phone_to
+            )
+            return True
+    except Exception as e:
+        st.error(f"Erro ao enviar SMS: {e}")
+    return False
 
 # --- FUNÇÃO DE SINCRONIZAÇÃO ---
 def sincronizar_atividades(strava_id, access_token):
     url_atividades = "https://www.strava.com/api/v3/athlete/activities"
     headers = {'Authorization': f'Bearer {access_token}'}
     try:
-        atividades = requests.get(url_atividades, headers=headers, params={'per_page': 50}).json()
+        atividades = requests.get(url_atividades, headers=headers, params={'per_page': 5}).json()
         if isinstance(atividades, list):
             for atividade in atividades:
                 payload = {
@@ -35,7 +58,11 @@ def sincronizar_atividades(strava_id, access_token):
                     "duracao": int(atividade['moving_time'] / 60),
                     "tipo_esporte": atividade['type']
                 }
+                # Ao fazer upsert, o banco ignora se já existir
                 supabase.table("atividades_fisicas").upsert(payload, on_conflict="id_atleta, data_treino").execute()
+            
+            # EXEMPLO: Enviar SMS ao terminar a sincronização
+            enviar_aviso_twilio(f"🚀 Treinos de {strava_id} sincronizados no Dashboard!")
             return True
     except Exception as e:
         st.error(f"Erro na sincronização: {e}")
@@ -101,39 +128,29 @@ if atleta_id:
         df['Cronica'] = df['trimp_score'].rolling(window=28, min_periods=1).mean()
         df['ACWR'] = df['Aguda'] / df['Cronica']
 
-        # 1. Métricas em Colunas
+        # Métricas
         m1, m2, m3 = st.columns(3)
+        ultimo_acwr = df['ACWR'].iloc[-1]
+        
         with m1:
-            st.metric("ACWR Atual", f"{df['ACWR'].iloc[-1]:.2f}")
+            st.metric("ACWR Atual", f"{ultimo_acwr:.2f}")
         with m2:
-            status = "✅ Seguro" if 0.8 <= df['ACWR'].iloc[-1] <= 1.3 else "⚠️ Risco"
+            status = "✅ Seguro" if 0.8 <= ultimo_acwr <= 1.3 else "⚠️ Risco"
             st.metric("Status", status)
+            # AVISO SMS AUTOMÁTICO DE RISCO
+            if ultimo_acwr > 1.3 and st.sidebar.button("Enviar Alerta de Risco"):
+                enviar_aviso_twilio(f"🚨 ALERTA: Carga Crítica ({ultimo_acwr:.2f}) para {nome_sel}. Risco de lesão!")
+
         with m3:
             st.metric("Total Treinos", len(df))
 
-        st.divider()
-
-        # 2. Gráfico corrigido
-        st.subheader("📊 Evolução de Carga (Aguda vs Crônica)")
-        
-        # Criamos a figura explicitamente
+        # Gráfico
         fig_carga, ax = plt.subplots(figsize=(12, 5))
-        
-        ax.plot(df['data_treino'], df['Aguda'], label="Carga Aguda (7d)", color="#1E90FF", linewidth=2)
-        ax.plot(df['data_treino'], df['Cronica'], label="Carga Crônica (28d)", color="#FF4500", linestyle="--")
-        
-        # Sombra da zona segura
-        ax.fill_between(df['data_treino'], 0.8 * df['Cronica'], 1.3 * df['Cronica'], color='green', alpha=0.1, label="Zona Ideal")
-        
-        ax.set_ylabel("Esforço (Pontos)")
-        ax.set_xlabel("Data do Treino")
+        ax.plot(df['data_treino'], df['Aguda'], label="Carga Aguda", color="#1E90FF")
+        ax.plot(df['data_treino'], df['Cronica'], label="Carga Crônica", color="#FF4500", ls="--")
+        ax.fill_between(df['data_treino'], 0.8 * df['Cronica'], 1.3 * df['Cronica'], color='green', alpha=0.1)
         ax.legend()
-        plt.xticks(rotation=45)
-        
-        # Comando crucial para exibir o gráfico
         st.pyplot(fig_carga)
 
     else:
-        st.info("Nenhuma atividade encontrada. Clique em 'Sincronizar Agora'.")
-else:
-    st.info("Selecione um atleta na barra lateral.")
+        st.info("Sem atividades. Clique em 'Sincronizar Agora'.")
