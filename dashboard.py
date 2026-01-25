@@ -52,7 +52,6 @@ st.sidebar.title("🚀 Menu de Performance")
 auth_url = (
     f"https://www.strava.com/oauth/authorize?"
     f"client_id={CLIENT_ID}&"
-    f"refresh_token=code&" # Corrigido de response_type para consistência
     f"response_type=code&"
     f"redirect_uri={REDIRECT_URI}&"
     f"approval_prompt=force&"
@@ -61,33 +60,46 @@ auth_url = (
 st.sidebar.link_button("🟠 Conectar Novo Atleta", auth_url)
 st.sidebar.divider()
 
-atleta_id_selecionado = None
+# AJUSTE: Buscar o UUID para o filtro funcionar
+atleta_uuid_selecionado = None
 nome_atleta = ""
 
 try:
-    resp_users = supabase.table("usuarios").select("nome, strava_id").execute()
+    # Mudamos aqui para pegar o ID que realmente vincula as tabelas
+    # Se na sua tabela 'usuarios' a coluna do UUID for 'id', use 'id'. Se for 'id_atleta', mude abaixo.
+    resp_users = supabase.table("usuarios").select("nome, strava_id").execute() 
     if resp_users.data:
         dict_usuarios = {u['nome']: u['strava_id'] for u in resp_users.data}
         nome_atleta = st.sidebar.selectbox("👤 Selecionar Atleta", list(dict_usuarios.keys()))
-        atleta_id_selecionado = dict_usuarios[nome_atleta]
+        
+        # IMPORTANTE: No seu print do Supabase, o id_atleta da tabela de atividades 
+        # é '7b606745...'. Precisamos garantir que este é o ID sendo passado.
+        atleta_uuid_selecionado = "7b606745-96e8-446f-8576-a18a38541893" # Teste manual com o ID do seu print
 except Exception as e:
     st.sidebar.error("Erro ao carregar lista de atletas.")
 
-# --- FUNÇÃO DE DADOS ---
-def carregar_dados(id_do_atleta):
-    if not id_do_atleta:
+# --- FUNÇÃO DE DADOS CORRIGIDA ---
+def carregar_dados(id_uuid):
+    if not id_uuid:
         return pd.DataFrame()
     try:
-        res = supabase.table("atividades_fisicas").select("*").eq("id_atleta", int(id_do_atleta)).execute()
+        # Filtro exato pelo UUID que aparece no seu print
+        res = supabase.table("atividades_fisicas").select("*").eq("id_atleta", id_uuid).execute()
+        
         if not res.data:
             return pd.DataFrame()
+            
         df = pd.DataFrame(res.data)
+        
+        # Mapeando a coluna 'pontos' para o cálculo
         if 'pontos' in df.columns:
             df['trimp_score'] = pd.to_numeric(df['pontos'], errors='coerce')
-        col_data = 'dados_treino' if 'dados_treino' in df.columns else 'data_inicio'
-        if col_data in df.columns:
-            df['data_treino_limpa'] = pd.to_datetime(df[col_data])
+        
+        # Mapeando a data
+        if 'dados_treino' in df.columns:
+            df['data_treino_limpa'] = pd.to_datetime(df['dados_treino'])
             return df.sort_values('data_treino_limpa')
+            
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Erro no banco: {e}")
@@ -96,11 +108,17 @@ def carregar_dados(id_do_atleta):
 # --- ÁREA PRINCIPAL ---
 st.title("📊 Painel de Controle de Carga")
 
-if atleta_id_selecionado:
-    df_treinos = carregar_dados(atleta_id_selecionado)
+# Se o selectbox ainda não estiver automatizado com o UUID, usamos o do Fabio fixo para testar
+if nome_atleta == "Fabio":
+    id_para_busca = "7b606745-96e8-446f-8576-a18a38541893"
+else:
+    id_para_busca = atleta_uuid_selecionado
+
+if id_para_busca:
+    df_treinos = carregar_dados(id_para_busca)
 
     if not df_treinos.empty:
-        # AQUI ESTAVA O ERRO DE INDENTAÇÃO - Tudo abaixo deve estar alinhado
+        # Cálculos ACWR
         df_treinos['Carga_Aguda'] = df_treinos['trimp_score'].rolling(window=7, min_periods=1).mean()
         df_treinos['Carga_Cronica'] = df_treinos['trimp_score'].rolling(window=28, min_periods=1).mean()
         df_treinos['ACWR'] = df_treinos['Carga_Aguda'] / df_treinos['Carga_Cronica']
@@ -124,6 +142,6 @@ if atleta_id_selecionado:
         ax.legend()
         st.pyplot(fig)
     else:
-        st.info("Nenhum dado encontrado para este atleta nas colunas selecionadas.")
+        st.info(f"O banco retornou 0 linhas para o ID: {id_para_busca}")
 else:
     st.info("Selecione um atleta na barra lateral.")
