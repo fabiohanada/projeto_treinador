@@ -5,13 +5,11 @@ import requests
 from supabase import create_client
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
-from datetime import datetime
 from twilio.rest import Client
 import hashlib
 
 # 1. Configurações Iniciais
 load_dotenv()
-# Título da aba do navegador atualizado
 st.set_page_config(page_title="Seu Treino App", layout="wide")
 
 def get_secret(key):
@@ -27,6 +25,7 @@ supabase = create_client(url, key)
 
 CLIENT_ID = get_secret("STRAVA_CLIENT_ID")
 CLIENT_SECRET = get_secret("STRAVA_CLIENT_SECRET")
+# IMPORTANTE: Verifique se esta URL no seu navegador termina exatamente assim
 REDIRECT_URI = "https://seu-treino-app.streamlit.app" 
 
 # --- FUNÇÕES DE SEGURANÇA ---
@@ -53,27 +52,39 @@ def cadastrar_usuario(nome, email, senha, telefone):
     except:
         return False
 
-# --- FUNÇÃO DE WHATSAPP ---
+# --- FUNÇÃO DE WHATSAPP (COM DIAGNÓSTICO) ---
 def enviar_whatsapp_twilio(mensagem):
     try:
         sid = get_secret("TWILIO_ACCOUNT_SID")
         token = get_secret("TWILIO_AUTH_TOKEN")
         phone_from = get_secret("TWILIO_PHONE_NUMBER")
         phone_to = st.session_state.user_info.get('telefone')
-        if not all([sid, token, phone_from, phone_to]): return False
+        
+        if not all([sid, token, phone_from, phone_to]):
+            st.warning("⚠️ Credenciais de WhatsApp não configuradas nos Secrets.")
+            return False
+
         client = Client(sid, token)
         p_from = f"whatsapp:{phone_from.replace('whatsapp:', '')}"
         p_to = f"whatsapp:{phone_to.replace('whatsapp:', '')}"
         client.messages.create(body=mensagem, from_=p_from, to=p_to)
         return True
-    except: return False
+    except Exception as e:
+        st.error(f"❌ Erro Twilio: {e}")
+        return False
 
 # --- FUNÇÃO DE SINCRONIZAÇÃO STRAVA ---
 def sincronizar_atividades(strava_id, access_token, nome_atleta):
     url_atv = "https://www.strava.com/api/v3/athlete/activities"
     headers = {'Authorization': f'Bearer {access_token}'}
     try:
-        atividades = requests.get(url_atv, headers=headers, params={'per_page': 15}).json()
+        res = requests.get(url_atv, headers=headers, params={'per_page': 10})
+        atividades = res.json()
+        
+        if res.status_code != 200:
+            st.error(f"❌ Erro Strava: {atividades.get('message')}")
+            return False
+
         if isinstance(atividades, list) and len(atividades) > 0:
             for atv in atividades:
                 payload = {
@@ -88,12 +99,11 @@ def sincronizar_atividades(strava_id, access_token, nome_atleta):
             
             recente = atividades[0]
             dist_km = recente.get('distance', 0) / 1000
-            msg = (f"🚀 *Treino Sincronizado!*\n\n"
-                   f"👤 *Atleta:* {nome_atleta}\n"
-                   f"📏 *Distância:* {dist_km:.2f} km")
+            msg = f"🚀 *Treino Sincronizado!*\n👤 Atleta: {nome_atleta}\n📏 Distância: {dist_km:.2f} km"
             enviar_whatsapp_twilio(msg)
             return True
-    except: pass
+    except Exception as e:
+        st.error(f"❌ Falha técnica: {e}")
     return False
 
 # --- CONTROLE DE SESSÃO ---
@@ -101,7 +111,7 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
     st.session_state.user_info = None
 
-# --- CAPTURA RETORNO DO STRAVA ---
+# --- CAPTURA RETORNO DO STRAVA (NA MESMA ABA) ---
 if "code" in st.query_params:
     code = st.query_params["code"]
     res_token = requests.post("https://www.strava.com/oauth/token", data={
@@ -116,6 +126,7 @@ if "code" in st.query_params:
             "access_token": res_token['access_token']
         }
         supabase.table("usuarios").upsert(u_strava).execute()
+        # Tenta sincronizar imediatamente
         sincronizar_atividades(u_strava["strava_id"], u_strava["access_token"], u_strava["nome"])
         st.query_params.clear()
         st.rerun()
@@ -124,9 +135,7 @@ if "code" in st.query_params:
 if not st.session_state.logado:
     st.markdown("""
         <style>
-        div.stButton > button:first-child { 
-            background-color: #007bff; color: white; border: none; font-weight: bold; border-radius: 8px; height: 45px;
-        }
+        div.stButton > button:first-child { background-color: #007bff; color: white; border: none; font-weight: bold; border-radius: 8px; height: 45px; }
         div.stButton > button:first-child:hover { background-color: #0056b3; color: white; }
         .main-header { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; }
         .runner-icon { font-size: 40px; color: #ff4b4b; }
@@ -137,14 +146,7 @@ if not st.session_state.logado:
 
     col1, col2, col3 = st.columns([1, 1.3, 1])
     with col2:
-        # Título da tela de login atualizado
-        st.markdown("""
-            <div class='main-header'>
-                <span class='runner-icon'>🏃‍♂️</span>
-                <span class='title-text'>Seu Treino App</span>
-            </div>
-        """, unsafe_allow_html=True)
-        
+        st.markdown("<div class='main-header'><span class='runner-icon'>🏃‍♂️</span><span class='title-text'>Seu Treino App</span></div>", unsafe_allow_html=True)
         tab1, tab2 = st.tabs(["Entrar", "Criar Conta"])
         with tab1:
             e = st.text_input("Email", key="l_email")
@@ -172,10 +174,10 @@ if not st.session_state.logado:
                     else: st.error("Erro ao cadastrar.")
     st.stop()
 
-# --- DASHBOARD (LOGADO) ---
+# --- DASHBOARD LOGADO ---
 st.sidebar.markdown(f"### 👤 {st.session_state.user_info['nome']}")
 
-# Conectar ao Strava
+# Botão Strava (Target Self para não abrir nova aba)
 auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
 st.sidebar.markdown(f"""
     <a href="{auth_url}" target="_self" style="text-decoration: none;">
@@ -185,7 +187,7 @@ st.sidebar.markdown(f"""
     </a>
 """, unsafe_allow_html=True)
 
-# Seleção de Atleta e Sincronizar
+# Seleção e Sincronização
 usuarios = supabase.table("usuarios").select("*").execute()
 if usuarios.data:
     opcoes = {u['nome']: u['strava_id'] for u in usuarios.data}
@@ -194,11 +196,11 @@ if usuarios.data:
     token_atleta = next(u['access_token'] for u in usuarios.data if u['strava_id'] == atleta_id)
 
     if st.sidebar.button("🔄 Sincronizar Agora", use_container_width=True):
-        if sincronizar_atividades(atleta_id, token_atleta, nome_sel):
-            st.sidebar.success("Atualizado!")
-            st.rerun()
+        with st.spinner("Buscando dados no Strava..."):
+            if sincronizar_atividades(atleta_id, token_atleta, nome_sel):
+                st.sidebar.success("Sincronizado!")
+                st.rerun()
 
-# Botão Sair
 st.sidebar.divider()
 if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
     st.session_state.logado = False
@@ -207,7 +209,6 @@ if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
 
 # --- CONTEÚDO PRINCIPAL ---
 if usuarios.data:
-    # Título principal do Dashboard atualizado
     st.title("📊 Painel Seu Treino App")
     res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", int(atleta_id)).execute()
     if res_atv.data:
@@ -225,4 +226,4 @@ if usuarios.data:
         ax.legend()
         st.pyplot(fig)
 else:
-    st.info("Conecte ao Strava para carregar os treinos.")
+    st.info("Nenhum atleta conectado. Use o botão laranja para autorizar o Strava.")
