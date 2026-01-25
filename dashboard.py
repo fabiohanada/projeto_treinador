@@ -111,33 +111,50 @@ st.title("📊 Painel de Controle de Carga")
 if atleta_id_selecionado:
     df_treinos = carregar_dados(atleta_id_selecionado)
 
-    if not df_treinos.empty and 'trimp_score' in df_treinos.columns:
-        # Cálculos de Carga
-        df_treinos['Carga_Aguda'] = df_treinos['trimp_score'].rolling(window=7, min_periods=1).mean()
-        df_treinos['Carga_Cronica'] = df_treinos['trimp_score'].rolling(window=28, min_periods=1).mean()
-        df_treinos['ACWR'] = df_treinos['Carga_Aguda'] / df_treinos['Carga_Cronica']
+    if not df_treinos.empty:
+        # --- LINHA DE DIAGNÓSTICO (Remova após funcionar) ---
+        # st.write("Colunas encontradas:", df_treinos.columns.tolist())
+        # st.write(df_treinos.head()) 
 
-        # Métricas
-        c1, c2, c3 = st.columns(3)
-        ultimo_acwr = df_treinos['ACWR'].iloc[-1]
+        # Verificação e Limpeza da coluna de pontos
+        # Altere 'pontos' abaixo para o nome EXATO que aparece no seu banco
+        coluna_esforço = 'pontos' 
         
-        with c1:
-            st.metric("ACWR Atual", f"{ultimo_acwr:.2f}")
-        with c2:
-            status = "✅ Seguro" if 0.8 <= ultimo_acwr <= 1.3 else "⚠️ Risco"
-            st.metric("Status", status)
-        with c3:
-            st.metric("Treinos Registrados", len(df_treinos))
+        if coluna_esforço in df_treinos.columns:
+            # Garante que os dados são números e remove linhas sem valor
+            df_treinos['trimp_score'] = pd.to_numeric(df_treinos[coluna_esforço], errors='coerce')
+            df_treinos = df_treinos.dropna(subset=['trimp_score'])
 
-        # Gráfico
-        st.subheader(f"Evolução de Carga: {nome_atleta}")
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(df_treinos['data_treino_limpa'], df_treinos['Carga_Aguda'], label="Aguda (7d)", color="#1E90FF")
-        ax.plot(df_treinos['data_treino_limpa'], df_treinos['Carga_Cronica'], label="Crônica (28d)", color="#FF4500", linestyle="--")
-        ax.fill_between(df_treinos['data_treino_limpa'], 0.8 * df_treinos['Carga_Cronica'], 1.3 * df_treinos['Carga_Cronica'], color='green', alpha=0.1)
-        ax.legend()
-        st.pyplot(fig)
+        if 'trimp_score' in df_treinos.columns and len(df_treinos) > 0:
+            # Cálculos de Carga
+            df_treinos['Carga_Aguda'] = df_treinos['trimp_score'].rolling(window=7, min_periods=1).mean()
+            df_treinos['Carga_Cronica'] = df_treinos['trimp_score'].rolling(window=28, min_periods=1).mean()
+            df_treinos['ACWR'] = df_treinos['Carga_Aguda'] / df_treinos['Carga_Cronica']
+
+            # Métricas
+            c1, c2, c3 = st.columns(3)
+            ultimo_acwr = df_treinos['ACWR'].iloc[-1]
+            
+            with c1:
+                st.metric("ACWR Atual", f"{ultimo_acwr:.2f}")
+            with c2:
+                status = "✅ Seguro" if 0.8 <= ultimo_acwr <= 1.3 else "⚠️ Risco"
+                st.metric("Status", status)
+            with c3:
+                st.metric("Treinos Analisados", len(df_treinos))
+
+            # Gráfico
+            st.subheader(f"Evolução de Carga: {nome_atleta}")
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.plot(df_treinos['data_treino_limpa'], df_treinos['Carga_Aguda'], label="Aguda (7d)", color="#1E90FF")
+            ax.plot(df_treinos['data_treino_limpa'], df_treinos['Carga_Cronica'], label="Crônica (28d)", color="#FF4500", linestyle="--")
+            ax.fill_between(df_treinos['data_treino_limpa'], 0.8 * df_treinos['Carga_Cronica'], 1.3 * df_treinos['Carga_Cronica'], color='green', alpha=0.1)
+            ax.legend()
+            st.pyplot(fig)
+        else:
+            st.error(f"A coluna '{coluna_esforço}' existe, mas parece estar vazia no banco de dados.")
+            st.write("Dados recebidos:", df_treinos)
     else:
-        st.info(f"Dados carregados, mas faltam colunas de performance para {nome_atleta}.")
+        st.info(f"Nenhuma atividade encontrada para {nome_atleta} no banco de dados.")
 else:
     st.info("Aguardando seleção de atleta...")
