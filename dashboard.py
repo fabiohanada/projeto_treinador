@@ -51,8 +51,8 @@ def sincronizar_atividades(strava_id, access_token):
                     "duracao": int(atividade['moving_time'] / 60),
                     "tipo_esporte": atividade['type']
                 }
-                # Upsert para não duplicar treinos na mesma data/hora
-                supabase.table("atividades_fisicas").upsert(payload, on_conflict="id_atleta, data_treino").execute()
+                # Agora o banco sabe que deve comparar id_atleta + data_treino
+                supabase.table("atividades_fisicas").upsert(payload).execute()
             return True
     except Exception as e:
         st.error(f"Erro na sincronização: {e}")
