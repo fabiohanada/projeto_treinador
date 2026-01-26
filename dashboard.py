@@ -37,10 +37,8 @@ def enviar_whatsapp(mensagem, telefone):
 def sincronizar_dados(strava_id, access_token, refresh_token, nome, telefone):
     url = "https://www.strava.com/api/v3/athlete/activities"
     headers = {'Authorization': f'Bearer {access_token}'}
-    
     try:
         res = requests.get(url, headers=headers, params={'per_page': 10})
-        
         if res.status_code == 401: # Token expirado
             r = requests.post("https://www.strava.com/oauth/token", data={
                 'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET,
@@ -62,28 +60,20 @@ def sincronizar_dados(strava_id, access_token, refresh_token, nome, telefone):
                     "distancia": atv['distance'] / 1000,
                     "tipo_esporte": atv['type']
                 }
-                # TRATAMENTO DE ERRO ESPECÍFICO PARA O UPSERT
-                try:
-                    supabase.table("atividades_fisicas").upsert(payload).execute()
-                except Exception as e:
-                    # Se der erro no banco, ele apenas avisa no log interno e pula para o próximo
-                    print(f"Erro ao salvar treino de {atv['start_date_local']}: {e}")
-                    continue
-            
+                try: supabase.table("atividades_fisicas").upsert(payload).execute()
+                except: continue
             enviar_whatsapp(f"✅ Treinos de {nome} sincronizados!", telefone)
             return True
-    except Exception as e:
-        st.error(f"Erro na conexão: {e}")
-        return False
+    except: return False
 
 # --- LOGIN ---
 if "logado" not in st.session_state: st.session_state.logado = False
 
 if not st.session_state.logado:
-    st.title("🏃‍♂️ Acesso")
+    st.title("🏃‍♂️ Acesso ao Sistema")
     e = st.text_input("E-mail", key="l_e")
     s = st.text_input("Senha", type="password", key="l_s")
-    if st.button("Entrar"):
+    if st.button("Entrar", use_container_width=True):
         u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
         if u.data:
             st.session_state.logado, st.session_state.user_info = True, u.data[0]
@@ -91,22 +81,22 @@ if not st.session_state.logado:
     st.stop()
 
 # --- DASHBOARD ---
-st.sidebar.markdown(f"### Olá, {st.session_state.user_info['nome']}")
+st.sidebar.subheader(f"Logado como: {st.session_state.user_info['nome']}")
 auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
 st.sidebar.markdown(f'<a href="{auth_url}" target="_self" style="text-decoration:none;"><div style="background-color:#FC4C02;color:white;text-align:center;padding:12px;border-radius:8px;font-weight:bold;margin-bottom:20px;">🟠 CONECTAR AO STRAVA</div></a>', unsafe_allow_html=True)
 
 res_strava = supabase.table("usuarios").select("*").execute()
 if res_strava.data:
     atletas = {u['nome']: u for u in res_strava.data}
-    sel = st.sidebar.selectbox("Atleta", list(atletas.keys()))
+    sel = st.sidebar.selectbox("Selecionar Atleta", list(atletas.keys()))
     d = atletas[sel]
 
-    if st.sidebar.button("🔄 Sincronizar Agora"):
+    if st.sidebar.button("🔄 Sincronizar Agora", use_container_width=True):
         if sincronizar_dados(d['strava_id'], d['access_token'], d.get('refresh_token'), sel, st.session_state.user_info['telefone']):
             st.toast("Sincronizado!")
             st.rerun()
 
-    # --- GRÁFICOS ---
+    # --- ÁREA DOS GRÁFICOS (LADO A LADO) ---
     res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", d['strava_id']).execute()
     if res_atv.data:
         df = pd.DataFrame(res_atv.data)
@@ -114,10 +104,23 @@ if res_strava.data:
         df['data_formatada'] = df['dt'].dt.strftime('%d/%m/%Y')
         df = df.sort_values('dt')
         
-        st.subheader("🗓️ Atividades por Dia")
-        st.bar_chart(df.groupby('data_formatada').size())
+        # CRIANDO AS COLUNAS
+        col_esq, col_dir = st.columns(2)
+
+        with col_esq:
+            st.subheader("🗓️ Atividades por Dia")
+            contagem = df.groupby('data_formatada').size()
+            st.bar_chart(contagem)
         
-        st.subheader("📈 Carga Aguda vs Crônica")
-        df['Aguda'] = df['trimp_score'].rolling(7, min_periods=1).mean()
-        df['Cronica'] = df['trimp_score'].rolling(28, min_periods=1).mean()
-        st.line_chart(df.set_index('data_formatada')[['Aguda', 'Cronica']])
+        with col_dir:
+            st.subheader("📈 Carga Aguda vs Crônica")
+            df['Aguda'] = df['trimp_score'].rolling(7, min_periods=1).mean()
+            df['Cronica'] = df['trimp_score'].rolling(28, min_periods=1).mean()
+            st.line_chart(df.set_index('data_formatada')[['Aguda', 'Cronica']])
+    else:
+        st.info("Nenhum dado encontrado. Sincronize com o Strava.")
+
+st.sidebar.divider()
+if st.sidebar.button("Sair"):
+    st.session_state.logado = False
+    st.rerun()
