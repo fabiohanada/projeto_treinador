@@ -4,9 +4,9 @@ import os
 import requests
 from supabase import create_client
 from dotenv import load_dotenv
-import matplotlib.pyplot as plt
 from twilio.rest import Client
 import hashlib
+from datetime import datetime
 
 # 1. Configurações Iniciais
 load_dotenv()
@@ -27,7 +27,7 @@ CLIENT_ID = get_secret("STRAVA_CLIENT_ID")
 CLIENT_SECRET = get_secret("STRAVA_CLIENT_SECRET")
 REDIRECT_URI = "https://seu-treino-app.streamlit.app" 
 
-# --- FUNÇÕES DE SEGURANÇA ---
+# --- FUNÇÕES DE SEGURANÇA E BANCO ---
 def hash_senha(senha):
     return hashlib.sha256(str.encode(senha)).hexdigest()
 
@@ -41,26 +41,49 @@ def validar_login(email, senha):
 
 def cadastrar_usuario(nome, email, senha, telefone):
     senha_hash = hash_senha(senha)
-    # Limpeza básica do telefone
     tel_limpo = ''.join(filter(str.isdigit, telefone))
-    if not tel_limpo.startswith('+'):
-        tel_limpo = f"+{tel_limpo}"
+    if not tel_limpo.startswith('+'): tel_limpo = f"+{tel_limpo}"
     
-    payload = {"nome": nome, "email": email, "senha": senha_hash, "telefone": tel_limpo}
+    payload = {
+        "nome": nome, 
+        "email": email, 
+        "senha": senha_hash, 
+        "telefone": tel_limpo,
+        "is_admin": False, # Por padrão não é admin
+        "plano_ativo": True, # Para teste, inicia ativo
+        "data_expiracao": "2026-12-31"
+    }
     try:
         supabase.table("usuarios_app").insert(payload).execute()
         return True
-    except:
+    except: return False
+
+# --- FUNÇÃO WHATSAPP ---
+def enviar_whatsapp(mensagem, telefone_destino):
+    try:
+        sid = get_secret("TWILIO_ACCOUNT_SID")
+        token = get_secret("TWILIO_AUTH_TOKEN")
+        phone_from = get_secret("TWILIO_PHONE_NUMBER") # Ex: whatsapp:+14155238886
+        
+        client = Client(sid, token)
+        p_to = f"whatsapp:{telefone_destino}"
+        p_from = phone_from if "whatsapp:" in phone_from else f"whatsapp:{phone_from}"
+        
+        client.messages.create(body=mensagem, from_=p_from, to=p_to)
+        return True
+    except Exception as e:
+        st.error(f"Erro Twilio: {e}")
         return False
 
-# --- FUNÇÃO DE SINCRONIZAÇÃO ---
-def sincronizar_dados(strava_id, access_token):
+# --- FUNÇÃO DE SINCRONIZAÇÃO STRAVA ---
+def sincronizar_dados(strava_id, access_token, nome_atleta, telefone):
     url_atv = "https://www.strava.com/api/v3/athlete/activities"
     headers = {'Authorization': f'Bearer {access_token}'}
     try:
-        res = requests.get(url_atv, headers=headers, params={'per_page': 10})
+        res = requests.get(url_atv, headers=headers, params={'per_page': 5})
         if res.status_code == 200:
             atividades = res.json()
+            novos_treinos = 0
             for atv in atividades:
                 payload = {
                     "id_atleta": int(strava_id),
@@ -70,7 +93,14 @@ def sincronizar_dados(strava_id, access_token):
                     "duracao": int(atv['moving_time'] / 60),
                     "tipo_esporte": atv['type']
                 }
-                supabase.table("atividades_fisicas").upsert(payload, on_conflict="id_atleta, data_treino").execute()
+                # O Upsert evita duplicados baseados na constraint do banco
+                supabase.table("atividades_fisicas").upsert(payload).execute()
+                novos_treinos += 1
+            
+            if novos_treinos > 0:
+                dist = atividades[0]['distance'] / 1000
+                msg = f"✅ Treino Sincronizado!\nAtleta: {nome_atleta}\nDistância: {dist:.2f}km\nData: {atividades[0]['start_date_local'][:10]}"
+                enviar_whatsapp(msg, telefone)
             return True
     except: pass
     return False
@@ -80,129 +110,88 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
     st.session_state.user_info = None
 
-# --- CAPTURA RETORNO DO STRAVA ---
-if "code" in st.query_params:
-    code = st.query_params["code"]
-    res_token = requests.post("https://www.strava.com/oauth/token", data={
-        "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
-        "code": code, "grant_type": "authorization_code"
-    }).json()
-    
-    if 'access_token' in res_token:
-        u_strava = {
-            "strava_id": res_token['athlete']['id'], 
-            "nome": res_token['athlete']['firstname'], 
-            "access_token": res_token['access_token']
-        }
-        supabase.table("usuarios").upsert(u_strava).execute()
-        sincronizar_dados(u_strava["strava_id"], u_strava["access_token"])
-        st.query_params.clear()
-        st.rerun()
-
-# --- INTERFACE: LOGIN / CADASTRO ---
+# --- FLUXO DE LOGIN/CADASTRO ---
 if not st.session_state.logado:
-    st.markdown("""
-        <style>
-        div.stButton > button:first-child { background-color: #007bff; color: white; font-weight: bold; border-radius: 8px; height: 45px; }
-        .main-header { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; }
-        .runner-icon { font-size: 40px; color: #ff4b4b; }
-        .title-text { font-size: 32px; font-weight: bold; color: #31333F; }
-        .stTabs [data-baseweb="tab-highlight"] { background-color: #ff4b4b; }
-        </style>
-    """, unsafe_allow_html=True)
-
-    col1, col2, col3 = st.columns([1, 1.3, 1])
+    col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
-        st.markdown("<div class='main-header'><span class='runner-icon'>🏃‍♂️</span><span class='title-text'>Seu Treino App</span></div>", unsafe_allow_html=True)
-        
-        tab_login, tab_cadastro = st.tabs(["Entrar", "Criar Conta"])
-        
-        with tab_login:
-            e = st.text_input("Email", key="login_email")
-            s = st.text_input("Senha", type="password", key="login_pass")
-            if st.button("Acessar Painel", use_container_width=True):
+        st.title("🏃‍♂️ Seu Treino App")
+        tab1, tab2 = st.tabs(["Entrar", "Criar Conta"])
+        with tab1:
+            e = st.text_input("E-mail")
+            s = st.text_input("Senha", type="password")
+            if st.button("Acessar"):
                 u = validar_login(e, s)
                 if u:
                     st.session_state.logado = True
                     st.session_state.user_info = u
                     st.rerun()
-                else: st.error("E-mail ou senha incorretos.")
-        
-        with tab_cadastro:
-            nome_c = st.text_input("Nome Completo")
-            email_c = st.text_input("E-mail de Cadastro")
-            tel_c = st.text_input("WhatsApp (Ex: 5511999999999)")
-            senha_c = st.text_input("Crie uma Senha", type="password")
-            
-            if st.button("Finalizar Cadastro", use_container_width=True):
-                if nome_c and email_c and tel_c and senha_c:
-                    if cadastrar_usuario(nome_c, email_c, senha_c, tel_c):
-                        st.success("Conta criada com sucesso! Faça login para continuar.")
-                    else: st.error("Erro ao cadastrar. E-mail já pode estar em uso.")
-                else: st.warning("Preencha todos os campos.")
+                else: st.error("Falha no login.")
+        with tab2:
+            n_c = st.text_input("Nome Completo")
+            e_c = st.text_input("E-mail de Cadastro")
+            t_c = st.text_input("WhatsApp (DDI+DDD+Num)")
+            s_c = st.text_input("Crie uma Senha", type="password")
+            if st.button("Cadastrar"):
+                if cadastrar_usuario(n_c, e_c, s_c, t_c):
+                    st.success("Conta criada! Vá para a aba Entrar.")
+                else: st.error("Erro ao cadastrar.")
     st.stop()
 
 # --- DASHBOARD LOGADO ---
-usuarios = supabase.table("usuarios").select("*").execute()
+st.sidebar.title(f"Olá, {st.session_state.user_info['nome']}")
 
-# Sincronização Automática ao Abrir
-if "auto_sync_done" not in st.session_state and usuarios.data:
-    for u in usuarios.data:
-        sincronizar_dados(u['strava_id'], u['access_token'])
-    st.session_state.auto_sync_done = True
+# Menu Administrativo (Só aparece se is_admin for True no banco)
+menu = ["Dashboard"]
+if st.session_state.user_info.get('is_admin'):
+    menu.append("👑 Admin")
 
-# --- SIDEBAR ---
-st.sidebar.markdown(f"### 👤 {st.session_state.user_info['nome']}")
+escolha = st.sidebar.selectbox("Navegação", menu)
 
-auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
-st.sidebar.markdown(f"""
-    <a href="{auth_url}" target="_self" style="text-decoration: none;">
-        <div style="background-color: #FC4C02; color: white; text-align: center; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 20px;">
-            🟠 Conectar ao Strava
-        </div>
-    </a>
-""", unsafe_allow_html=True)
+if escolha == "👑 Admin":
+    st.title("Painel Administrativo")
+    res_users = supabase.table("usuarios_app").select("nome, email, telefone, plano_ativo, data_expiracao").execute()
+    df_users = pd.DataFrame(res_users.data)
+    st.table(df_users)
+    st.stop()
 
-if usuarios.data:
-    opcoes = {u['nome']: u['strava_id'] for u in usuarios.data}
-    nome_sel = st.sidebar.selectbox("Selecionar Atleta", list(opcoes.keys()))
-    atleta_id = opcoes[nome_sel]
-    token_atleta = next(u['access_token'] for u in usuarios.data if u['strava_id'] == atleta_id)
-    
-    if st.sidebar.button("🔄 Sincronizar Agora", use_container_width=True):
-        with st.spinner("Atualizando dados..."):
-            if sincronizar_dados(atleta_id, token_atleta):
-                st.sidebar.success("Sincronizado!")
-                st.rerun()
+# --- FLUXO DASHBOARD PRINCIPAL ---
+usuarios_strava = supabase.table("usuarios").select("*").execute()
 
-st.sidebar.divider()
-if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
-    st.session_state.logado = False
-    st.rerun()
+# Sidebar Strava
+auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&...&scope=read,activity:read_all" # simplificado
+st.sidebar.markdown(f'[🟠 Conectar Strava]({auth_url})')
 
-# --- CONTEÚDO PRINCIPAL (LADO A LADO) ---
-if usuarios.data:
-    st.title(f"📊 Painel: {nome_sel}")
-    res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", int(atleta_id)).execute()
-    
+if usuarios_strava.data:
+    lista_atletas = {u['nome']: u for u in usuarios_strava.data}
+    atleta_nome = st.sidebar.selectbox("Selecionar Atleta", list(lista_atletas.keys()))
+    atleta_dados = lista_atletas[atleta_nome]
+
+    if st.sidebar.button("🔄 Sincronizar Agora"):
+        with st.spinner("Sincronizando..."):
+            sincronizar_dados(atleta_dados['strava_id'], atleta_dados['access_token'], atleta_nome, st.session_state.user_info['telefone'])
+            st.rerun()
+
+    # --- GRÁFICOS LADO A LADO ---
+    res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", atleta_dados['strava_id']).execute()
     if res_atv.data:
         df = pd.DataFrame(res_atv.data)
         df['data_treino'] = pd.to_datetime(df['data_treino']).dt.date
         df = df.sort_values('data_treino')
 
-        col_esq, col_dir = st.columns(2)
-
-        with col_esq:
+        col1, col2 = st.columns(2)
+        with col1:
             st.subheader("🗓️ Atividades por Dia")
-            contagem_diaria = df['data_treino'].value_counts().sort_index()
-            df_barras = pd.DataFrame({'Data': contagem_diaria.index, 'Quantidade': contagem_diaria.values}).set_index('Data')
-            st.bar_chart(df_barras, color="#ff4b4b")
-
-        with col_dir:
+            counts = df['data_treino'].value_counts().sort_index()
+            st.bar_chart(counts)
+        with col2:
             st.subheader("📈 Carga Aguda vs Crônica")
-            df_plot = df.copy()
-            df_plot['Aguda'] = df_plot['trimp_score'].rolling(7).mean()
-            df_plot['Cronica'] = df_plot['trimp_score'].rolling(28).mean()
-            st.line_chart(df_plot.set_index('data_treino')[['Aguda', 'Cronica']])
+            df['Aguda'] = df['trimp_score'].rolling(7).mean()
+            df['Cronica'] = df['trimp_score'].rolling(28).mean()
+            st.line_chart(df.set_index('data_treino')[['Aguda', 'Cronica']])
     else:
-        st.info("Conecte ao Strava para carregar os treinos.")
+        st.info("Nenhum treino encontrado para este atleta.")
+
+st.sidebar.divider()
+if st.sidebar.button("Sair"):
+    st.session_state.logado = False
+    st.rerun()
