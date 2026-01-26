@@ -32,9 +32,7 @@ def enviar_whatsapp(mensagem, telefone):
         tel_limpo = ''.join(filter(str.isdigit, telefone))
         client.messages.create(body=mensagem, from_=get_secret("TWILIO_PHONE_NUMBER"), to=f"whatsapp:+{tel_limpo}")
         return True
-    except Exception as e:
-        st.warning(f"Aviso WhatsApp: {e}")
-        return False
+    except: return False
 
 def sincronizar_dados(strava_id, access_token, refresh_token, nome, telefone):
     url = "https://www.strava.com/api/v3/athlete/activities"
@@ -43,14 +41,7 @@ def sincronizar_dados(strava_id, access_token, refresh_token, nome, telefone):
     try:
         res = requests.get(url, headers=headers, params={'per_page': 10})
         
-        # Se o token expirou (Erro 401)
-        if res.status_code == 401:
-            st.warning("Token expirado. Tentando renovar...")
-            if not refresh_token:
-                st.error("Erro: Você não tem um 'refresh_token' no banco. Clique no botão laranja do Strava novamente.")
-                return False
-            
-            # Lógica de renovação
+        if res.status_code == 401: # Token expirado
             r = requests.post("https://www.strava.com/oauth/token", data={
                 'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET,
                 'grant_type': 'refresh_token', 'refresh_token': refresh_token
@@ -60,9 +51,6 @@ def sincronizar_dados(strava_id, access_token, refresh_token, nome, telefone):
                 supabase.table("usuarios").update({"access_token": access_token}).eq("strava_id", strava_id).execute()
                 headers = {'Authorization': f'Bearer {access_token}'}
                 res = requests.get(url, headers=headers, params={'per_page': 10})
-            else:
-                st.error(f"Falha ao renovar token: {r.text}")
-                return False
 
         if res.status_code == 200:
             atividades = res.json()
@@ -74,24 +62,25 @@ def sincronizar_dados(strava_id, access_token, refresh_token, nome, telefone):
                     "distancia": atv['distance'] / 1000,
                     "tipo_esporte": atv['type']
                 }
-                supabase.table("atividades_fisicas").upsert(payload).execute()
+                # TRATAMENTO DE ERRO ESPECÍFICO PARA O UPSERT
+                try:
+                    supabase.table("atividades_fisicas").upsert(payload).execute()
+                except Exception as e:
+                    # Se der erro no banco, ele apenas avisa no log interno e pula para o próximo
+                    print(f"Erro ao salvar treino de {atv['start_date_local']}: {e}")
+                    continue
             
-            enviar_whatsapp(f"✅ Treinos de {nome} atualizados!", telefone)
+            enviar_whatsapp(f"✅ Treinos de {nome} sincronizados!", telefone)
             return True
-        else:
-            st.error(f"Erro Strava: {res.status_code}")
-            return False
-
     except Exception as e:
-        # ISSO VAI FAZER O ERRO PARAR NA TELA PARA VOCÊ LER
-        st.exception(e) 
+        st.error(f"Erro na conexão: {e}")
         return False
 
-# --- LOGIN (Simplificado para o teste) ---
+# --- LOGIN ---
 if "logado" not in st.session_state: st.session_state.logado = False
 
 if not st.session_state.logado:
-    st.title("🏃‍♂️ Login")
+    st.title("🏃‍♂️ Acesso")
     e = st.text_input("E-mail", key="l_e")
     s = st.text_input("Senha", type="password", key="l_s")
     if st.button("Entrar"):
@@ -102,7 +91,9 @@ if not st.session_state.logado:
     st.stop()
 
 # --- DASHBOARD ---
-st.sidebar.markdown(f'<a href="https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all" target="_self" style="text-decoration:none;"><div style="background-color:#FC4C02;color:white;text-align:center;padding:12px;border-radius:8px;font-weight:bold;margin-bottom:20px;">🟠 CONECTAR AO STRAVA</div></a>', unsafe_allow_html=True)
+st.sidebar.markdown(f"### Olá, {st.session_state.user_info['nome']}")
+auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
+st.sidebar.markdown(f'<a href="{auth_url}" target="_self" style="text-decoration:none;"><div style="background-color:#FC4C02;color:white;text-align:center;padding:12px;border-radius:8px;font-weight:bold;margin-bottom:20px;">🟠 CONECTAR AO STRAVA</div></a>', unsafe_allow_html=True)
 
 res_strava = supabase.table("usuarios").select("*").execute()
 if res_strava.data:
@@ -111,27 +102,22 @@ if res_strava.data:
     d = atletas[sel]
 
     if st.sidebar.button("🔄 Sincronizar Agora"):
-        # Adicionamos um log visual para ver o que está sendo enviado
-        st.write(f"Tentando sincronizar {sel}...")
-        
-        # O erro costuma ser aqui: d.get('refresh_token')
         if sincronizar_dados(d['strava_id'], d['access_token'], d.get('refresh_token'), sel, st.session_state.user_info['telefone']):
-            st.success("Sincronizado! Agora clique no botão abaixo para atualizar os gráficos.")
-            if st.button("Ver Gráficos Atualizados"):
-                st.rerun()
+            st.toast("Sincronizado!")
+            st.rerun()
 
     # --- GRÁFICOS ---
     res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", d['strava_id']).execute()
     if res_atv.data:
         df = pd.DataFrame(res_atv.data)
         df['dt'] = pd.to_datetime(df['data_treino'])
-        df['data_limpa'] = df['dt'].dt.strftime('%d/%m/%Y')
+        df['data_formatada'] = df['dt'].dt.strftime('%d/%m/%Y')
         df = df.sort_values('dt')
         
         st.subheader("🗓️ Atividades por Dia")
-        st.bar_chart(df.groupby('data_limpa').size())
+        st.bar_chart(df.groupby('data_formatada').size())
         
         st.subheader("📈 Carga Aguda vs Crônica")
         df['Aguda'] = df['trimp_score'].rolling(7, min_periods=1).mean()
         df['Cronica'] = df['trimp_score'].rolling(28, min_periods=1).mean()
-        st.line_chart(df.set_index('data_limpa')[['Aguda', 'Cronica']])
+        st.line_chart(df.set_index('data_formatada')[['Aguda', 'Cronica']])
