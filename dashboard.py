@@ -28,7 +28,7 @@ if not st.session_state.logado:
     st.title("🏃‍♂️ Acesso ao Sistema")
     e = st.text_input("E-mail")
     s = st.text_input("Senha", type="password")
-    if st.button("Entrar"):
+    if st.button("Entrar", use_container_width=True):
         senha_h = hashlib.sha256(str.encode(s)).hexdigest()
         u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", senha_h).execute()
         if u.data:
@@ -49,76 +49,71 @@ if res_strava.data:
     sel = st.sidebar.selectbox("Selecionar Atleta", list(atletas.keys()))
     d = atletas[sel]
 
-    # --- NOVO: FILTRO DE TEMPO ---
     dias_filtro = st.sidebar.radio("Período de Análise", [7, 30, 90, "Tudo"], index=1)
 
     if st.sidebar.button("🔄 Sincronizar Agora", use_container_width=True):
-        # ... (lógica de sincronização já existente) ...
-        st.toast("Dados atualizados!")
+        st.toast("Sincronizando...")
+        # (A lógica de sincronizar_dados deve estar definida ou chamada aqui)
         st.rerun()
 
     # --- PROCESSAMENTO DE DADOS ---
     res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", d['strava_id']).execute()
     if res_atv.data:
         df = pd.DataFrame(res_atv.data)
-        df['dt'] = pd.to_datetime(df['data_treino'])
+        # CONVERSÃO PARA DATETIME COM UTC FORÇADO
+        df['dt'] = pd.to_datetime(df['data_treino'], utc=True)
         df = df.sort_values('dt')
         
-        # Filtro de tempo aplicado ao DF
+        # Filtro de tempo com Timezone Awareness
         if dias_filtro != "Tudo":
-            cutoff = pd.Timestamp.now() - pd.Timedelta(days=dias_filtro)
+            cutoff = pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=int(dias_filtro))
             df = df[df['dt'] >= cutoff]
 
-        # Cálculos de Carga e ACWR
-        df['Aguda'] = df['trimp_score'].rolling(7, min_periods=1).mean()
-        df['Cronica'] = df['trimp_score'].rolling(28, min_periods=1).mean()
-        ultima_aguda = df['Aguda'].iloc[-1]
-        ultima_cronica = df['Cronica'].iloc[-1]
-        ratio = ultima_aguda / ultima_cronica if ultima_cronica > 0 else 0
+        if not df.empty:
+            # Cálculos de Carga
+            df['Aguda'] = df['trimp_score'].rolling(7, min_periods=1).mean()
+            df['Cronica'] = df['trimp_score'].rolling(28, min_periods=1).mean()
+            ultima_aguda = df['Aguda'].iloc[-1]
+            ultima_cronica = df['Cronica'].iloc[-1]
+            ratio = ultima_aguda / ultima_cronica if ultima_cronica > 0 else 0
 
-        # --- BLOCO 1: MÉTRICAS E ALERTA ACWR ---
-        st.markdown(f"## 📊 Dashboard de Performance: {sel}")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Carga Aguda (7d)", f"{ultima_aguda:.1f}")
-        m2.metric("Carga Crônica (28d)", f"{ultima_cronica:.1f}")
-        
-        status_acwr = "PERIGO" if ratio > 1.5 else "OTIMIZADO" if 0.8 <= ratio <= 1.3 else "RECUPERAÇÃO"
-        m3.metric("Rácio ACWR", f"{ratio:.2f}", delta=status_acwr, delta_color="normal" if status_acwr == "OTIMIZADO" else "inverse")
+            st.markdown(f"## 📊 Dashboard: {sel}")
+            
+            # MÉTRICAS
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Carga Aguda (7d)", f"{ultima_aguda:.1f}")
+            m2.metric("Carga Crônica (28d)", f"{ultima_cronica:.1f}")
+            status_acwr = "PERIGO" if ratio > 1.5 else "OTIMIZADO" if 0.8 <= ratio <= 1.3 else "ALERTA"
+            m3.metric("Rácio ACWR", f"{ratio:.2f}", delta=status_acwr, delta_color="normal" if status_acwr == "OTIMIZADO" else "inverse")
 
-        # --- NOVO: BARRA DE META SEMANAL ---
-        st.divider()
-        meta_km = 40.0 # Exemplo de meta
-        km_na_semana = df[df['dt'] >= (pd.Timestamp.now() - pd.Timedelta(days=7))]['distancia'].sum()
-        progresso = min(km_na_semana / meta_km, 1.0)
-        
-        st.subheader(f"🏁 Meta Semanal: {km_na_semana:.1f}km / {meta_km}km")
-        st.progress(progresso)
-        if km_na_semana >= meta_km:
-            st.success("🎉 Meta semanal batida!")
+            # META SEMANAL
+            st.divider()
+            meta_km = 40.0
+            inicio_semana = pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7)
+            km_na_semana = df[df['dt'] >= inicio_semana]['distancia'].sum()
+            progresso = min(km_na_semana / meta_km, 1.0)
+            st.subheader(f"🏁 Meta Semanal: {km_na_semana:.1f}km / {meta_km}km")
+            st.progress(progresso)
 
-        # --- BLOCO 2: GRÁFICOS ---
-        df['data_f'] = df['dt'].dt.strftime('%d/%m/%Y')
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("🗓️ Volume por Dia")
-            st.bar_chart(df.groupby('data_f')['distancia'].sum())
-        with c2:
-            st.subheader("📈 Carga Aguda vs Crônica")
-            st.line_chart(df.set_index('data_f')[['Aguda', 'Cronica']])
+            # GRÁFICOS
+            df['data_f'] = df['dt'].dt.strftime('%d/%m/%Y')
+            c1, c2 = st.columns(2)
+            with c1:
+                st.subheader("🗓️ Volume por Dia")
+                st.bar_chart(df.groupby('data_f')['distancia'].sum())
+            with c2:
+                st.subheader("📈 Carga Aguda vs Crônica")
+                st.line_chart(df.set_index('data_f')[['Aguda', 'Cronica']])
 
-        # --- NOVO: TABELA DE ÚLTIMOS TREINOS ---
-        st.subheader("📋 Últimos Treinos Detalhados")
-        # Calculando Pace (min/km) simplificado
-        # Como o trimp_score aqui é o tempo em minutos:
-        df['Pace'] = df['trimp_score'] / df['distancia']
-        tabela_view = df[['data_f', 'tipo_esporte', 'distancia', 'trimp_score', 'Pace']].tail(5).copy()
-        tabela_view.columns = ['Data', 'Tipo', 'Distância (km)', 'Duração (min)', 'Pace (min/km)']
-        st.dataframe(tabela_view, use_container_width=True)
-
+            # TABELA
+            st.subheader("📋 Últimos Treinos")
+            df['Pace'] = df['trimp_score'] / df['distancia']
+            tabela_view = df[['data_f', 'tipo_esporte', 'distancia', 'trimp_score', 'Pace']].tail(5).copy()
+            st.dataframe(tabela_view, use_container_width=True)
+        else:
+            st.warning("Sem dados para o período selecionado.")
     else:
-        st.info("Nenhum treino no período selecionado.")
-else:
-    st.info("Conecte um atleta no botão laranja.")
+        st.info("Nenhum treino encontrado.")
 
 st.sidebar.divider()
 if st.sidebar.button("Sair"):
