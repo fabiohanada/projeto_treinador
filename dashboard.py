@@ -25,7 +25,28 @@ REDIRECT_URI = "https://seu-treino-app.streamlit.app"
 def hash_senha(senha):
     return hashlib.sha256(str.encode(senha)).hexdigest()
 
-def sincronizar_dados(strava_id, access_token, refresh_token):
+def enviar_whatsapp(mensagem, telefone_destino):
+    """Envia notificação via Twilio Sandbox"""
+    try:
+        sid = get_secret("TWILIO_ACCOUNT_SID")
+        token = get_secret("TWILIO_AUTH_TOKEN")
+        p_from = get_secret("TWILIO_PHONE_NUMBER") # Deve ser 'whatsapp:+14155238886'
+        
+        client = Client(sid, token)
+        # Limpa o número para garantir o formato correto
+        tel_limpo = ''.join(filter(str.isdigit, str(telefone_destino)))
+        
+        client.messages.create(
+            body=mensagem,
+            from_=p_from if "whatsapp:" in p_from else f"whatsapp:{p_from}",
+            to=f"whatsapp:+{tel_limpo}"
+        )
+        return True
+    except Exception as e:
+        st.error(f"Erro WhatsApp: {e}")
+        return False
+
+def sincronizar_dados(strava_id, access_token):
     url = "https://www.strava.com/api/v3/athlete/activities"
     headers = {'Authorization': f'Bearer {access_token}'}
     try:
@@ -66,7 +87,6 @@ if not st.session_state.logado:
                 else: st.error("E-mail ou senha incorretos.")
     st.stop()
 
-# --- VARIÁVEIS DE SESSÃO ---
 user = st.session_state.user_info
 eh_admin = user.get('is_admin', False)
 
@@ -74,12 +94,10 @@ eh_admin = user.get('is_admin', False)
 # 👨‍🏫 VISÃO ADMINISTRADOR (TREINADOR)
 # =================================================================
 if eh_admin:
-    # --- BARRA LATERAL ADMIN ---
     with st.sidebar:
         st.title(f"👨‍🏫 Treinador: {user['nome']}")
         st.divider()
         
-        # Botão Strava
         auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
         st.markdown(f'<a href="{auth_url}" target="_self" style="text-decoration:none;"><div style="background-color:#FC4C02;color:white;text-align:center;padding:12px;border-radius:8px;font-weight:bold;margin-bottom:20px;">🟠 CONECTAR NOVO ATLETA</div></a>', unsafe_allow_html=True)
 
@@ -93,23 +111,16 @@ if eh_admin:
             st.divider()
             dias_filtro = st.radio("Período de Análise", [7, 30, 90, "Tudo"], index=1)
             
-            # AÇÕES PRINCIPAIS
             if st.button("🔄 Sincronizar Agora", use_container_width=True, type="primary"):
-                if sincronizar_dados(d['strava_id'], d['access_token'], d.get('refresh_token')):
+                if sincronizar_dados(d['strava_id'], d['access_token']):
+                    enviar_whatsapp(f"✅ Treinos de {sel} atualizados no sistema!", user['telefone'])
                     st.toast(f"Dados de {sel} atualizados!")
                     st.rerun()
             
-            # BOTÃO SAIR (ABAIXO DO SINCRONIZAR)
-            if st.button("🚪 Sair do Sistema", use_container_width=True):
-                st.session_state.logado = False
-                st.rerun()
-        else:
-            st.info("Conecte um atleta no botão laranja.")
             if st.button("🚪 Sair do Sistema", use_container_width=True):
                 st.session_state.logado = False
                 st.rerun()
 
-    # --- ÁREA PRINCIPAL ADMIN ---
     if res_strava.data:
         st.title(f"📊 Dashboard: {sel}")
         res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", d['strava_id']).execute()
@@ -118,7 +129,6 @@ if eh_admin:
             df = pd.DataFrame(res_atv.data)
             df['dt'] = pd.to_datetime(df['data_treino'], utc=True)
             df = df.sort_values('dt')
-            
             if dias_filtro != "Tudo":
                 cutoff = pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=int(dias_filtro))
                 df = df[df['dt'] >= cutoff]
@@ -128,21 +138,27 @@ if eh_admin:
             df['Cronica'] = df['trimp_score'].rolling(28, min_periods=1).mean()
             ratio = df['Aguda'].iloc[-1] / df['Cronica'].iloc[-1] if df['Cronica'].iloc[-1] > 0 else 0
 
-            # 1. MÉTRICAS DE TOPO
+            # MÉTRICAS
             m1, m2, m3 = st.columns(3)
             m1.metric("Carga Aguda", f"{df['Aguda'].iloc[-1]:.1f}")
             m2.metric("Carga Crônica", f"{df['Cronica'].iloc[-1]:.1f}")
             status = "PERIGO" if ratio > 1.5 else "OTIMIZADO" if 0.8 <= ratio <= 1.3 else "ALERTA"
             m3.metric("Rácio ACWR", f"{ratio:.2f}", delta=status, delta_color="normal" if status == "OTIMIZADO" else "inverse")
 
-            # 2. META SEMANAL
-            st.divider()
-            meta_km = 40.0
-            km_semana = df[df['dt'] >= (pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7))]['distancia'].sum()
-            st.subheader(f"🏁 Meta Semanal: {km_semana:.1f}km / {meta_km}km")
-            st.progress(min(km_semana/meta_km, 1.0))
+            # --- BOTÃO DE ALERTA WHATSAPP (Aparece se houver risco) ---
+            if ratio > 1.5:
+                st.error(f"⚠️ Atenção! {sel} está em zona de risco.")
+                if st.button(f"📩 Enviar Alerta de Lesão para {sel}", use_container_width=True):
+                    msg = f"🚨 *ALERTA DE SEGURANÇA*\n\nAtleta: {sel}\nSeu rácio de carga atingiu {ratio:.2f}.\n\nRecomendação: Reduzir a intensidade nos próximos treinos para evitar lesões."
+                    if enviar_whatsapp(msg, user['telefone']):
+                        st.success("Alerta enviado via WhatsApp!")
 
-            # 3. GRÁFICOS
+            # META E GRÁFICOS
+            st.divider()
+            km_semana = df[df['dt'] >= (pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7))]['distancia'].sum()
+            st.subheader(f"🏁 Meta Semanal: {km_semana:.1f}km / 40.0km")
+            st.progress(min(km_semana/40.0, 1.0))
+
             c1, c2 = st.columns(2)
             df['data_f'] = df['dt'].dt.strftime('%d/%m')
             with c1:
@@ -152,14 +168,9 @@ if eh_admin:
                 st.subheader("📈 Carga Aguda vs Crônica")
                 st.line_chart(df.set_index('data_f')[['Aguda', 'Cronica']])
 
-            # 4. TABELA E PACE
-            st.subheader("📋 Últimos Treinos Detalhados")
+            st.subheader("📋 Últimos Treinos")
             df['Pace'] = df['trimp_score'] / df['distancia']
-            tabela = df[['data_f', 'tipo_esporte', 'distancia', 'trimp_score', 'Pace']].tail(5).copy()
-            tabela.columns = ['Data', 'Esporte', 'Km', 'Minutos', 'Pace (min/km)']
-            st.dataframe(tabela, use_container_width=True)
-        else:
-            st.info("Sincronize os dados para ver as análises.")
+            st.dataframe(df[['data_f', 'tipo_esporte', 'distancia', 'Pace']].tail(5), use_container_width=True)
 
 # =================================================================
 # 🏃‍♂️ VISÃO ATLETA (CLIENTE)
@@ -173,14 +184,9 @@ else:
 
     st.title(f"🚀 Fala, {user['nome']}!")
     meu_id = user.get('strava_id')
-    
     if meu_id:
         res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", meu_id).execute()
         if res_atv.data:
             df = pd.DataFrame(res_atv.data)
             st.metric("Sua Distância Total", f"{df['distancia'].sum():.1f} km")
             st.area_chart(df.tail(15).set_index('data_treino')['distancia'])
-        else:
-            st.info("Aguardando sincronização do treinador.")
-    else:
-        st.warning("⚠️ Conta pendente de vínculo Strava.")
