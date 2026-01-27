@@ -93,7 +93,7 @@ if not st.session_state.logado:
             n_tel = st.text_input("WhatsApp (DDD+Número)")
             n_senha = st.text_input("Crie uma Senha", type="password")
             with st.expander("Ver Termos de Uso e LGPD"):
-                st.write("Seus dados de treino serão analisados apenas para fins esportivos pela assessoria.")
+                st.write("Seus dados de treino serão analisados para fins de acompanhamento esportivo.")
             if st.checkbox("Aceito os termos", key="check_lgpd"):
                 if st.button("Finalizar Cadastro", use_container_width=True):
                     payload = {"nome": n_nome, "email": n_email, "telefone": n_tel, "senha": hash_senha(n_senha), 
@@ -104,100 +104,81 @@ if not st.session_state.logado:
     st.stop()
 
 # =================================================================
-# 🏠 ÁREA LOGADA (PÓS-LOGIN)
+# 🏠 ÁREA LOGADA
 # =================================================================
 user = st.session_state.user_info
 eh_admin = user.get('is_admin', False)
 
-# Barra Lateral Universal
 with st.sidebar:
     st.header(f"👋 {user['nome']}")
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.logado = False
         st.rerun()
 
-# --- LOGICA DE DADOS (TREINADOR OU ATLETA PRECISAM DISSO) ---
+# Lógica de Pagamento
 v_str = user.get('data_vencimento', '2000-01-01')
 venc_date = datetime.strptime(v_str, '%Y-%m-%d').date()
 pago = user.get('status_pagamento', False) and data_hoje <= venc_date
 
 if eh_admin:
-    # VISÃO ADMINISTRADOR
     st.title("👨‍🏫 Painel do Treinador")
-    tab_f, tab_t = st.tabs(["💰 Financeiro", "📊 Performance Alunos"])
-    
-    with tab_f:
-        st.subheader("Gestão de Acesso")
-        res_alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
-        if res_alunos.data:
-            for aluno in res_alunos.data:
-                with st.container(border=True):
-                    c1, c2, c3 = st.columns([2, 1, 1])
-                    c1.write(f"**{aluno['nome']}** ({aluno['email']})")
-                    status_atual = "Ativo" if aluno['status_pagamento'] else "Bloqueado"
-                    c2.write(f"Status: {status_atual}")
-                    if c3.button("Inverter Status", key=f"inv_{aluno['id']}"):
-                        supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
-                        st.rerun()
+    # (Sua lógica de Admin aqui...)
 else:
     # VISÃO ATLETA
-    st.title("🚀 Seu Dashboard")
+    st.title("🚀 Dashboard do Atleta")
     
-    # Inicializa variáveis para evitar NameError nas tabs
+    # Inicialização de variáveis de dados
     res_atv_data = []
     atleta_strava = None
-
+    
+    # Busca dados do Strava se o aluno estiver pago
     if pago:
         res_s = supabase.table("usuarios").select("*").eq("email", user['email']).execute()
         if res_s.data:
             atleta_strava = res_s.data[0]
+            # --- BOTÃO DE SINCRONIZAÇÃO FIXO NO TOPO ---
+            if st.button("🔄 ATUALIZAR MEUS TREINOS (STRAVA)", type="primary", use_container_width=True):
+                with st.spinner("Sincronizando atividades..."):
+                    if sincronizar_dados(atleta_strava['strava_id'], atleta_strava['access_token']):
+                        st.success("Dados atualizados!")
+                        st.rerun()
+            
             res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", atleta_strava['strava_id']).execute()
             res_atv_data = res_atv.data if res_atv else []
+        else:
+            st.warning("⚠️ Seu Strava ainda não está vinculado.")
+            link_strava = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=activity:read_all&state={user['email']}"
+            st.link_button("🔗 Vincular Strava Agora", link_strava)
+    else:
+        st.error("🚨 Acesso suspenso por pendência financeira. Regularize na aba 'Assinatura'.")
 
-    t1, t2, t3 = st.tabs(["📊 Resumo", "📈 Performance ACWR", "💰 Assinatura"])
+    # ABAS DE CONTEÚDO
+    t1, t2, t3 = st.tabs(["📊 Histórico", "📈 Evolução ACWR", "💳 Assinatura"])
 
     with t1:
-        if pago:
-            if atleta_strava:
-                if st.button("🔄 Sincronizar Strava", type="primary"):
-                    sincronizar_dados(atleta_strava['strava_id'], atleta_strava['access_token'])
-                    st.rerun()
-                if res_atv_data:
-                    df = pd.DataFrame(res_atv_data)
-                    st.subheader("Últimas Atividades")
-                    st.dataframe(df.tail(10), use_container_width=True)
-                else:
-                    st.info("Nenhum treino sincronizado ainda.")
-            else:
-                st.warning("Vincule seu Strava para ver os treinos.")
-                link_strava = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=activity:read_all&state={user['email']}"
-                st.link_button("🔗 Conectar Strava", link_strava)
-        else:
-            st.error("Acesso suspenso por pendência financeira.")
+        if pago and res_atv_data:
+            df = pd.DataFrame(res_atv_data)
+            st.subheader("Últimos Treinos Registrados")
+            st.dataframe(df.sort_values(by='data_treino', ascending=False).head(15), use_container_width=True)
 
     with t2:
         if pago and res_atv_data:
-            st.subheader("Índice de Carga Aguda/Crônica (ACWR)")
+            st.subheader("Seu Índice de Carga")
             df_p = pd.DataFrame(res_atv_data)
             df_p['data_treino'] = pd.to_datetime(df_p['data_treino'])
             df_res = df_p.groupby(df_p['data_treino'].dt.date)['distancia'].sum().resample('D').sum().fillna(0).to_frame()
             if len(df_res) >= 28:
-                df_res['aguda'] = df_res['distancia'].rolling(7).mean()
-                df_res['cronica'] = df_res['distancia'].rolling(28).mean()
-                df_res['acwr'] = df_res['aguda'] / df_res['cronica']
+                df_res['acwr'] = df_res['distancia'].rolling(7).mean() / df_res['distancia'].rolling(28).mean()
                 st.line_chart(df_res['acwr'])
             else:
-                st.info("Aguardando mais dados (mínimo 28 dias) para gerar o gráfico de carga.")
-        else:
-            st.info("Aba de performance bloqueada ou sem dados.")
+                st.info("Aguardando mais treinos para calcular o risco de lesão.")
 
     with t3:
-        st.header("💳 Minha Assinatura")
         if pago:
-            st.success(f"Tudo em dia! Seu acesso está garantido até {venc_date.strftime('%d/%m/%Y')}.")
+            st.success(f"Assinatura ativa até {venc_date.strftime('%d/%m/%Y')}")
         else:
-            st.warning(f"Sua assinatura expirou em {venc_date.strftime('%d/%m/%Y')}.")
-            st.markdown("**Chave Pix:** `seu-email@pix.com`")
-            if st.button("✅ Já realizei o pagamento"):
-                enviar_whatsapp(f"Pagamento informado por: {user['nome']}", "5511999999999")
-                st.toast("Fábio foi notificado!")
+            st.markdown(f"Expirou em: **{venc_date.strftime('%d/%m/%Y')}**")
+            st.info("Chave Pix: `seu-email@pix.com` - Envie o comprovante pelo botão abaixo.")
+            if st.button("✅ Informar Pagamento"):
+                enviar_whatsapp(f"Pagamento informado por {user['nome']}", "5511999999999")
+                st.toast("Notificação enviada ao Fábio!")
