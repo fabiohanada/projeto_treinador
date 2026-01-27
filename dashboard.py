@@ -86,30 +86,24 @@ with st.sidebar:
 # 👨‍🏫 TELA DO FÁBIO (ADMIN)
 if eh_admin:
     st.title("👨‍🏫 Gestão de Alunos e Financeiro")
-    
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     
     if alunos.data:
         for aluno in alunos.data:
             with st.container(border=True):
                 col1, col2, col3, col4 = st.columns([2, 1.5, 1, 1])
-                
                 col1.subheader(aluno['nome'])
                 col1.write(f"📧 {aluno['email']}")
                 
-                # Status Atual
                 status = "✅ ATIVO" if aluno['status_pagamento'] else "❌ BLOQUEADO"
                 col2.write(f"**Status:** {status}")
                 col2.write(f"**Vencimento:** {aluno['data_vencimento']}")
                 
-                # Botão de Bloqueio/Desbloqueio
                 label_btn = "Bloquear" if aluno['status_pagamento'] else "Ativar"
                 if col3.button(label_btn, key=f"btn_{aluno['id']}", use_container_width=True):
-                    novo_status = not aluno['status_pagamento']
-                    supabase.table("usuarios_app").update({"status_pagamento": novo_status}).eq("id", aluno['id']).execute()
+                    supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                     st.rerun()
                 
-                # Ajuste de Data
                 nova_data = col4.date_input("Novo Vencimento", key=f"date_{aluno['id']}")
                 if col4.button("Salvar Data", key=f"save_{aluno['id']}"):
                     supabase.table("usuarios_app").update({"data_vencimento": str(nova_data)}).eq("id", aluno['id']).execute()
@@ -122,28 +116,40 @@ if eh_admin:
 else:
     st.title(f"🚀 Dashboard: {user['nome']}")
     
-    # Validação de acesso
+    # --- SEÇÃO FINANCEIRA DO CLIENTE ---
     v_str = user.get('data_vencimento', "2000-01-01")
     venc_date = datetime.strptime(v_str, '%Y-%m-%d').date()
-    pago = user.get('status_pagamento', False) and datetime.now().date() <= venc_date
+    dias_restantes = (venc_date - datetime.now().date()).days
+    pago = user.get('status_pagamento', False) and dias_restantes >= 0
 
+    with st.expander("💳 Minha Assinatura / Financeiro", expanded=not pago):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Status", "✅ Ativo" if pago else "❌ Inativo")
+        c2.metric("Vencimento", venc_date.strftime('%d/%m/%Y'))
+        c3.metric("Dias Restantes", f"{max(0, dias_restantes)} dias")
+        
+        if not pago:
+            st.warning("⚠️ Seu acesso está suspenso. Realize o pagamento para liberar os treinos.")
+            st.write("**Chave Pix para renovação:** `sua-chave-pix-aqui@pix.com`")
+
+    # --- BLOQUEIO DE CONTEÚDO ---
     if not pago:
-        st.error(f"🚨 Acesso Suspenso. Vencimento: {venc_date.strftime('%d/%m/%Y')}. Fale com o Fábio.")
         st.stop()
 
-    # Conteúdo do Strava (Sincronização e Tabela)
+    # --- CONTEÚDO STRAVA ---
     res_s = supabase.table("usuarios").select("*").eq("email", user['email']).execute()
     if res_s.data:
         atleta = res_s.data[0]
-        if st.button("🔄 Atualizar Treinos", type="primary"):
+        if st.button("🔄 Atualizar Meus Treinos", type="primary"):
             sincronizar_dados(atleta['strava_id'], atleta['access_token'])
             st.rerun()
         
         atividades = supabase.table("atividades_fisicas").select("*").eq("id_atleta", atleta['strava_id']).execute()
         if atividades.data:
+            st.subheader("Meus Treinos Recentes")
             st.dataframe(pd.DataFrame(atividades.data), use_container_width=True)
     else:
-        st.warning("Vincule seu Strava.")
+        st.warning("Vincule seu Strava para começar.")
         auth_url = (f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}"
                     f"&response_type=code&approval_prompt=auto&scope=read,activity:read&state={user['email']}")
         st.link_button("🔗 Conectar Strava", auth_url)
