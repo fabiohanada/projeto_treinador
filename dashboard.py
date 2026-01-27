@@ -16,9 +16,9 @@ def get_secret(key):
 supabase = create_client(get_secret("SUPABASE_URL"), get_secret("SUPABASE_KEY"))
 CLIENT_ID = get_secret("STRAVA_CLIENT_ID")
 CLIENT_SECRET = get_secret("STRAVA_CLIENT_SECRET")
-REDIRECT_URI = "https://seu-treino-app.streamlit.app" # Verifique se este é o link atual
+REDIRECT_URI = "https://seu-treino-app.streamlit.app" 
 
-# --- FUNÇÕES ---
+# --- FUNÇÕES CORE ---
 def hash_senha(senha): return hashlib.sha256(str.encode(senha)).hexdigest()
 
 def sincronizar_dados(strava_id, access_token):
@@ -34,12 +34,11 @@ def sincronizar_dados(strava_id, access_token):
     return False
 
 # =================================================================
-# 🔑 SISTEMA DE LOGIN (SÓ APARECE SE NÃO ESTIVER LOGADO)
+# 🔑 LOGIN E CALLBACK
 # =================================================================
-if "logado" not in st.session_state:
-    st.session_state.logado = False
+if "logado" not in st.session_state: st.session_state.logado = False
 
-# Processamento do Strava (Callback)
+# Processamento Strava
 params = st.query_params
 if "code" in params and "state" in params:
     cod, email_aluno = params["code"], params["state"]
@@ -50,8 +49,7 @@ if "code" in params and "state" in params:
     if "access_token" in res_t:
         supabase.table("usuarios").upsert({
             "email": email_aluno, "strava_id": res_t["athlete"]["id"],
-            "access_token": res_t["access_token"], "refresh_token": res_t["refresh_token"],
-            "nome": res_t["athlete"]["firstname"]
+            "access_token": res_t["access_token"], "refresh_token": res_t["refresh_token"]
         }).execute()
         st.success("✅ Strava vinculado!")
         st.query_params.clear()
@@ -59,92 +57,93 @@ if "code" in params and "state" in params:
 
 if not st.session_state.logado:
     st.markdown("<h1 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h1>", unsafe_allow_html=True)
-    tab_l, tab_c = st.tabs(["Entrar", "Novo Cadastro"])
-    
-    with tab_l:
-        with st.form("login_form"):
+    c1, c2, c3 = st.columns([1,2,1])
+    with c2:
+        with st.form("login"):
             u_email = st.text_input("E-mail")
             u_senha = st.text_input("Senha", type="password")
             if st.form_submit_button("Entrar", use_container_width=True):
                 u = supabase.table("usuarios_app").select("*").eq("email", u_email).eq("senha", hash_senha(u_senha)).execute()
                 if u.data:
-                    st.session_state.logado = True
-                    st.session_state.user_info = u.data[0]
+                    st.session_state.logado, st.session_state.user_info = True, u.data[0]
                     st.rerun()
-                else: st.error("Dados incorretos.")
-    with tab_c:
-        st.info("Cadastre-se para começar seus treinos.")
-        # ... (seu código de cadastro aqui)
-    st.stop() # Interrompe aqui para quem não está logado
+                else: st.error("Erro de login.")
+    st.stop()
 
 # =================================================================
-# 🏠 ÁREA LOGADA (DASHBOARD) - SÓ CHEGA AQUI SE LOGAR
+# 🏠 ÁREA LOGADA
 # =================================================================
 user = st.session_state.user_info
 eh_admin = user.get('is_admin', False)
 
-# Barra Lateral (Comum a todos)
 with st.sidebar:
     st.title("🏃‍♂️ Menu")
-    st.write(f"Usuário: **{user['nome']}**")
-    if eh_admin: st.subheader("⭐ Perfil Treinador")
+    st.write(f"Logado: **{user['nome']}**")
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.logado = False
         st.rerun()
 
-# -----------------------------------------------------------------
-# 👨‍🏫 VISÃO DO ADMIN (FÁBIO)
-# -----------------------------------------------------------------
+# 👨‍🏫 TELA DO FÁBIO (ADMIN)
 if eh_admin:
-    st.title("👨‍🏫 Painel de Controle - Treinador")
+    st.title("👨‍🏫 Gestão de Alunos e Financeiro")
     
-    tabs = st.tabs(["👥 Alunos", "💰 Financeiro", "📊 Performance Geral"])
+    alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     
-    with tabs[0]:
-        st.subheader("Lista de Alunos Cadastrados")
-        alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
-        if alunos.data:
-            df_alunos = pd.DataFrame(alunos.data)
-            st.dataframe(df_alunos[['nome', 'email', 'telefone', 'data_vencimento']], use_container_width=True)
-        else:
-            st.write("Nenhum aluno cadastrado.")
+    if alunos.data:
+        for aluno in alunos.data:
+            with st.container(border=True):
+                col1, col2, col3, col4 = st.columns([2, 1.5, 1, 1])
+                
+                col1.subheader(aluno['nome'])
+                col1.write(f"📧 {aluno['email']}")
+                
+                # Status Atual
+                status = "✅ ATIVO" if aluno['status_pagamento'] else "❌ BLOQUEADO"
+                col2.write(f"**Status:** {status}")
+                col2.write(f"**Vencimento:** {aluno['data_vencimento']}")
+                
+                # Botão de Bloqueio/Desbloqueio
+                label_btn = "Bloquear" if aluno['status_pagamento'] else "Ativar"
+                if col3.button(label_btn, key=f"btn_{aluno['id']}", use_container_width=True):
+                    novo_status = not aluno['status_pagamento']
+                    supabase.table("usuarios_app").update({"status_pagamento": novo_status}).eq("id", aluno['id']).execute()
+                    st.rerun()
+                
+                # Ajuste de Data
+                nova_data = col4.date_input("Novo Vencimento", key=f"date_{aluno['id']}")
+                if col4.button("Salvar Data", key=f"save_{aluno['id']}"):
+                    supabase.table("usuarios_app").update({"data_vencimento": str(nova_data)}).eq("id", aluno['id']).execute()
+                    st.success("Data atualizada!")
+                    st.rerun()
+    else:
+        st.info("Nenhum aluno cadastrado.")
 
-    with tabs[1]:
-        st.subheader("Controle de Pagamentos")
-        # Aqui você pode listar quem está com 'status_pagamento' = False
-        st.info("Funcionalidade em desenvolvimento: Em breve você poderá ativar/desativar alunos aqui.")
-
-# -----------------------------------------------------------------
-# 🚀 VISÃO DO ALUNO
-# -----------------------------------------------------------------
+# 🚀 TELA DO ALUNO
 else:
-    st.title(f"🚀 Dashboard do Atleta: {user['nome']}")
+    st.title(f"🚀 Dashboard: {user['nome']}")
     
-    # Verifica se o aluno pagou
+    # Validação de acesso
     v_str = user.get('data_vencimento', "2000-01-01")
     venc_date = datetime.strptime(v_str, '%Y-%m-%d').date()
     pago = user.get('status_pagamento', False) and datetime.now().date() <= venc_date
 
     if not pago:
-        st.error(f"🚨 Sua assinatura expirou em {venc_date.strftime('%d/%m/%Y')}. Entre em contato com o Fábio.")
+        st.error(f"🚨 Acesso Suspenso. Vencimento: {venc_date.strftime('%d/%m/%Y')}. Fale com o Fábio.")
         st.stop()
 
-    # Se estiver pago, mostra o Strava
+    # Conteúdo do Strava (Sincronização e Tabela)
     res_s = supabase.table("usuarios").select("*").eq("email", user['email']).execute()
-    
     if res_s.data:
         atleta = res_s.data[0]
-        if st.button("🔄 Sincronizar Meus Treinos", type="primary"):
+        if st.button("🔄 Atualizar Treinos", type="primary"):
             sincronizar_dados(atleta['strava_id'], atleta['access_token'])
             st.rerun()
         
-        # Histórico
-        res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", atleta['strava_id']).execute()
-        if res_atv.data:
-            st.subheader("Meu Histórico")
-            st.dataframe(pd.DataFrame(res_atv.data), use_container_width=True)
+        atividades = supabase.table("atividades_fisicas").select("*").eq("id_atleta", atleta['strava_id']).execute()
+        if atividades.data:
+            st.dataframe(pd.DataFrame(atividades.data), use_container_width=True)
     else:
-        st.warning("Vincule seu Strava para ver seus treinos.")
+        st.warning("Vincule seu Strava.")
         auth_url = (f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}"
                     f"&response_type=code&approval_prompt=auto&scope=read,activity:read&state={user['email']}")
         st.link_button("🔗 Conectar Strava", auth_url)
