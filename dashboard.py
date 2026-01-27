@@ -29,7 +29,7 @@ def sincronizar_dados(strava_id, access_token, refresh_token):
     url = "https://www.strava.com/api/v3/athlete/activities"
     headers = {'Authorization': f'Bearer {access_token}'}
     try:
-        res = requests.get(url, headers=headers, params={'per_page': 10})
+        res = requests.get(url, headers=headers, params={'per_page': 15})
         if res.status_code == 200:
             atividades = res.json()
             for atv in atividades:
@@ -70,82 +70,92 @@ if not st.session_state.logado:
 user = st.session_state.user_info
 eh_admin = user.get('is_admin', False)
 
+# --- SIDEBAR (Sair e Ferramentas) ---
+with st.sidebar:
+    st.title(f"{'👨‍🏫' if eh_admin else '🏃‍♂️'} {user['nome']}")
+    if st.button("🚪 Sair do Sistema", use_container_width=True):
+        st.session_state.logado = False
+        st.rerun()
+    st.divider()
+    
+    if eh_admin:
+        auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
+        st.markdown(f'<a href="{auth_url}" target="_self" style="text-decoration:none;"><div style="background-color:#FC4C02;color:white;text-align:center;padding:12px;border-radius:8px;font-weight:bold;margin-bottom:20px;">🟠 CONECTAR NOVO ATLETA</div></a>', unsafe_allow_html=True)
+
 # =================================================================
 # 👨‍🏫 VISÃO ADMINISTRADOR (TREINADOR)
 # =================================================================
 if eh_admin:
-    st.sidebar.title(f"👨‍🏫 Treinador: {user['nome']}")
-    
-    # Botão Strava
-    auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&approval_prompt=force&scope=read,activity:read_all"
-    st.sidebar.markdown(f'<a href="{auth_url}" target="_self" style="text-decoration:none;"><div style="background-color:#FC4C02;color:white;text-align:center;padding:12px;border-radius:8px;font-weight:bold;margin-bottom:20px;">🟠 CONECTAR NOVO ATLETA</div></a>', unsafe_allow_html=True)
-
     res_strava = supabase.table("usuarios").select("*").execute()
     
     if res_strava.data:
         atletas = {u['nome']: u for u in res_strava.data}
-        sel = st.sidebar.selectbox("Selecionar Atleta", list(atletas.keys()))
+        sel = st.sidebar.selectbox("Selecionar Aluno", list(atletas.keys()))
         d = atletas[sel]
+        
+        dias_filtro = st.sidebar.radio("Período", [7, 30, 90, "Tudo"], index=1)
 
-        # Botão Sincronizar
         if st.sidebar.button("🔄 Sincronizar Agora", use_container_width=True):
             if sincronizar_dados(d['strava_id'], d['access_token'], d.get('refresh_token')):
-                st.toast("Dados atualizados!")
+                st.toast(f"Dados de {sel} atualizados!")
                 st.rerun()
 
         # Dashboard Admin
-        st.title(f"📊 Dashboard: {sel}")
+        st.title(f"📊 Análise: {sel}")
         res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", d['strava_id']).execute()
         
         if res_atv.data:
             df = pd.DataFrame(res_atv.data)
             df['dt'] = pd.to_datetime(df['data_treino'], utc=True)
             df = df.sort_values('dt')
-            df['data_f'] = df['dt'].dt.strftime('%d/%m')
+            
+            # Filtro de Tempo
+            if dias_filtro != "Tudo":
+                cutoff = pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=int(dias_filtro))
+                df = df[df['dt'] >= cutoff]
 
-            # Cálculos
+            # Cálculos de Carga
             df['Aguda'] = df['trimp_score'].rolling(7, min_periods=1).mean()
             df['Cronica'] = df['trimp_score'].rolling(28, min_periods=1).mean()
             ratio = df['Aguda'].iloc[-1] / df['Cronica'].iloc[-1] if df['Cronica'].iloc[-1] > 0 else 0
 
-            # Métricas de Topo
+            # 1. MÉTRICAS DE TOPO
             m1, m2, m3 = st.columns(3)
-            m1.metric("Carga Aguda", f"{df['Aguda'].iloc[-1]:.1f}")
-            m2.metric("Carga Crônica", f"{df['Cronica'].iloc[-1]:.1f}")
-            m3.metric("Rácio ACWR", f"{ratio:.2f}", delta="ALERTA" if ratio > 1.5 else "ZONA IDEAL", delta_color="inverse" if ratio > 1.5 else "normal")
+            m1.metric("Carga Aguda (7d)", f"{df['Aguda'].iloc[-1]:.1f}")
+            m2.metric("Carga Crônica (28d)", f"{df['Cronica'].iloc[-1]:.1f}")
+            status = "PERIGO" if ratio > 1.5 else "OTIMIZADO" if 0.8 <= ratio <= 1.3 else "ALERTA"
+            m3.metric("Rácio ACWR", f"{ratio:.2f}", delta=status, delta_color="normal" if status == "OTIMIZADO" else "inverse")
 
-            # Gráficos
+            # 2. META SEMANAL
+            st.divider()
+            meta_km = 40.0
+            km_semana = df[df['dt'] >= (pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7))]['distancia'].sum()
+            st.subheader(f"🏁 Meta Semanal: {km_semana:.1f}km / {meta_km}km")
+            st.progress(min(km_semana/meta_km, 1.0))
+
+            # 3. GRÁFICOS
             c1, c2 = st.columns(2)
+            df['data_f'] = df['dt'].dt.strftime('%d/%m')
             with c1:
                 st.subheader("🗓️ Volume por Dia")
                 st.bar_chart(df.groupby('data_f')['distancia'].sum())
             with c2:
-                st.subheader("📈 Progressão de Carga")
+                st.subheader("📈 Carga Aguda vs Crônica")
                 st.line_chart(df.set_index('data_f')[['Aguda', 'Cronica']])
+
+            # 4. TABELA DETALHADA
+            st.subheader("📋 Últimos Treinos")
+            df['Pace'] = df['trimp_score'] / df['distancia']
+            tabela = df[['data_f', 'tipo_esporte', 'distancia', 'trimp_score', 'Pace']].tail(5).copy()
+            tabela.columns = ['Data', 'Esporte', 'Km', 'Minutos', 'Pace (min/km)']
+            st.dataframe(tabela, use_container_width=True)
         else:
-            st.info("Sincronize os dados deste atleta no menu lateral.")
+            st.info("Sem dados para este período.")
+    else:
+        st.info("Conecte um atleta no botão laranja.")
 
 # =================================================================
 # 🏃‍♂️ VISÃO ATLETA (CLIENTE)
 # =================================================================
 else:
-    st.sidebar.title(f"🏃‍♂️ Atleta: {user['nome']}")
-    st.title("🚀 Sua Evolução")
-    
-    meu_id = user.get('strava_id')
-    if meu_id:
-        res_atv = supabase.table("atividades_fisicas").select("*").eq("id_atleta", meu_id).execute()
-        if res_atv.data:
-            df = pd.DataFrame(res_atv.data)
-            st.subheader("Seu progresso semanal")
-            st.area_chart(df.tail(10).set_index('data_treino')['distancia'])
-        else:
-            st.info("Nenhum treino encontrado.")
-    else:
-        st.warning("⚠️ Conta pendente de vínculo com Strava pelo treinador.")
-
-# --- BOTÃO SAIR (FIXADO NO FINAL DA SIDEBAR) ---
-st.sidebar.markdown("<br>" * 10, unsafe_allow_html=True) # Empurra para baixo
-if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
-    st.session_state.logado = False
-    st.rerun()
+    st.title(f"🚀
