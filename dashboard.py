@@ -1,4 +1,4 @@
-import streamlit as st
+u import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os, requests, hashlib
@@ -8,7 +8,7 @@ from twilio.rest import Client
 
 # 1. CONFIGURAÇÕES E CONEXÕES
 load_dotenv()
-st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Seu App Treino", layout="wide", page_icon="🏃‍♂️")
 
 def get_secret(key):
     try: return st.secrets[key] if key in st.secrets else os.getenv(key)
@@ -20,7 +20,7 @@ CLIENT_SECRET = get_secret("STRAVA_CLIENT_SECRET")
 
 # AJUSTE AQUI: Use a URL exata do seu app no Streamlit Cloud
 if st.secrets.get("SUPABASE_URL"):
-    REDIRECT_URI = "https://seu-projeto-fabio.streamlit.app" 
+    REDIRECT_URI = "https://fabio-assessoria.streamlit.app" # SEM barra / no final 
 else:
     REDIRECT_URI = "http://localhost:8501"
 
