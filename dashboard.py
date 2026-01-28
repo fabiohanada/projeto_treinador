@@ -8,9 +8,9 @@ from supabase import create_client
 # 1. CONFIGURAÇÕES (Estilo Estável 27/01)
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
-# --- CONFIGURAÇÃO PIX ---
+# --- CONFIGURAÇÃO PIX (Sincronizado com suas mudanças) ---
 chave_pix_visivel = "fabioh1979@hotmail.com"
-# Cole o código "Copia e Cola" aqui para o QR Code funcionar
+# Seu código Copia e Cola atualizado
 pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
 
 # CSS para restaurar o visual exato (E-mail sem sublinhado e formulário centralizado)
@@ -68,7 +68,7 @@ def formatar_data_br(data_str):
     except: return data_str
 
 # =================================================================
-# 🔑 LOGIN E CADASTRO (Layout 27/01)
+# 🔑 LOGIN E CADASTRO
 # =================================================================
 if "logado" not in st.session_state: st.session_state.logado = False
 
@@ -115,22 +115,19 @@ with st.sidebar:
         st.session_state.logado = False
         st.rerun()
 
-# 👨‍🏫 PAINEL ADMIN (Restaurado 27/01 com Alerta de Pagamento)
+# 👨‍🏫 PAINEL ADMIN (Com Alerta de Pagamento Maria)
 if eh_admin:
     st.title("👨‍🏫 Painel Administrativo")
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     
     if alunos.data:
         for aluno in alunos.data:
-            # Lógica de Notificação para Maria
             is_maria = "Maria" in aluno['nome']
-            
             with st.container(border=True):
                 c_info, c_btns = st.columns([3, 1])
                 with c_info:
-                    # Alerta de pagamento detectado (Simulação baseada no seu teste de 0,01)
                     if is_maria and not aluno['status_pagamento']:
-                        st.warning(f"🔔 NOTIFICAÇÃO: Pagamento de Teste (R$ 0,01) identificado para {aluno['nome']}!")
+                        st.warning(f"🔔 NOTIFICAÇÃO: Pagamento de Teste identificado para {aluno['nome']}!")
                     
                     pago_badge = "<span class='status-pago'>PAGO</span>" if aluno['status_pagamento'] else ""
                     st.markdown(f"**Aluno:** {aluno['nome']} {pago_badge}", unsafe_allow_html=True)
@@ -152,7 +149,7 @@ if eh_admin:
                         supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                         st.rerun()
 
-# 🚀 DASHBOARD CLIENTE (Com QR Code dinâmico)
+# 🚀 DASHBOARD CLIENTE (Com suas atualizações de valor e QR Code)
 else:
     st.title("🚀 Meus Treinos")
     v_str = user.get('data_vencimento', "2000-01-01")
@@ -167,16 +164,16 @@ else:
         
         st.markdown("---")
         
-        # QR Code Gerado via API (Encode para evitar erro)
-        payload_pix = urllib.parse.quote(pix_copia_e_cola)
-        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={payload_pix}"
+        # Payload encode para garantir que o QR Code seja gerado sem erros
+        payload_encoded = urllib.parse.quote(pix_copia_e_cola)
+        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={payload_encoded}"
         
         st.markdown(f"""
             <div class="pix-card">
                 <h3 style="margin-top:0; color:#333;">💳 Renovação via PIX</h3>
                 <p>Escaneie o QR Code abaixo para pagar:</p>
                 <div style="background-color: white; padding: 10px; display: inline-block; border-radius: 10px; border: 1px solid #eee;">
-                    <img src="{qr_url}" width="200">
+                    <img src="{qr_url}" width="200" alt="QR Code PIX">
                 </div>
                 <p style="margin-top:15px; font-size: 0.9em;"><b>Chave PIX:</b></p>
                 <span class="pix-chave">{chave_pix_visivel}</span>
@@ -188,5 +185,4 @@ else:
             st.error("⚠️ Seu acesso está suspenso. Realize o pagamento acima para liberar seus treinos.")
             st.stop()
 
-    # Conteúdo Liberado
     st.success(f"Olá {user['nome']}, seus treinos estão liberados!")
