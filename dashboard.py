@@ -7,7 +7,7 @@ from supabase import create_client
 from twilio.rest import Client 
 
 # ==========================================
-# VERSÃO: v1 (LAYOUT INTEGRAL - NÃO MODIFICAR)
+# VERSÃO: v1 (LAYOUT INTEGRAL RESTAURADO)
 # ==========================================
 
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
@@ -32,20 +32,17 @@ def enviar_whatsapp_real(nome_aluno, telefone, treino_nome, km, tempo):
         tel_limpo = "".join(filter(str.isdigit, str(telefone)))
         if not tel_limpo.startswith("55"): tel_limpo = "55" + tel_limpo
         num_destino = f"whatsapp:+{tel_limpo}"
-        msg = f"🏃‍♂️ *Fábio Assessoria*\n\nOlá *{nome_aluno}*! Seu treino: *{treino_nome}*, {km}km em {tempo}min. 🚀"
+        msg = f"🏃‍♂️ *Fábio Assessoria*\n\nOlá *{nome_aluno}*! Seu treino sincronizado: *{treino_nome}*, {km}km em {tempo}min. 🚀"
         client.messages.create(body=msg, from_=num_origem, to=num_destino)
         return True
     except: return False
 
 # --- LÓGICA ANTI-F5 ---
 if "logado" not in st.session_state: st.session_state.logado = False
-
-query_params = st.query_params
-if "user_mail" in query_params and not st.session_state.logado:
-    u = supabase.table("usuarios_app").select("*").eq("email", query_params["user_mail"]).execute()
+if "user_mail" in st.query_params and not st.session_state.logado:
+    u = supabase.table("usuarios_app").select("*").eq("email", st.query_params["user_mail"]).execute()
     if u.data:
-        st.session_state.logado = True
-        st.session_state.user_info = u.data[0]
+        st.session_state.logado, st.session_state.user_info = True, u.data[0]
 
 # =================================================================
 # 🔑 LOGIN E CADASTRO
@@ -73,7 +70,7 @@ if not st.session_state.logado:
                 s_c = st.text_input("Senha", type="password")
                 if st.form_submit_button("Cadastrar"):
                     supabase.table("usuarios_app").insert({"nome": n_c, "email": e_c, "telefone": t_c, "senha": hash_senha(s_c), "status_pagamento": False, "data_vencimento": str(datetime.now().date())}).execute()
-                    st.success("Cadastrado! Use a aba Entrar.")
+                    st.success("Cadastrado!")
     st.stop()
 
 # =================================================================
@@ -92,18 +89,27 @@ with st.sidebar:
         st.query_params.clear()
         st.rerun()
 
-# 👨‍🏫 PAINEL ADMIN
+# 👨‍🏫 PAINEL ADMIN (RESTURADO v1)
 if eh_admin:
     st.title("👨‍🏫 Painel Administrativo")
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     for aluno in alunos.data:
         with st.container(border=True):
-            c_i, c_b = st.columns([3, 1])
-            c_i.markdown(f"**Aluno:** {aluno['nome']} ({'✅' if aluno['status_pagamento'] else '❌'})")
-            c_i.write(f"Vencimento: {formatar_data_br(aluno['data_vencimento'])}")
-            if c_b.button("Liberar/Bloquear", key=aluno['id']):
-                supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
-                st.rerun()
+            c_info, c_btns = st.columns([3, 1])
+            with c_info:
+                pago_status = "✅ PAGO" if aluno['status_pagamento'] else "❌ PENDENTE"
+                st.markdown(f"**Aluno:** {aluno['nome']} | **Status:** {pago_status}")
+                st.write(f"Vencimento Atual: {formatar_data_br(aluno['data_vencimento'])}")
+                # Campo de data restaurado
+                nova_data = st.date_input("Alterar Vencimento", value=datetime.strptime(aluno['data_vencimento'], '%Y-%m-%d'), key=f"d_{aluno['id']}")
+            with c_btns:
+                if st.button("💾 Salvar Data", key=f"s_{aluno['id']}", use_container_width=True):
+                    supabase.table("usuarios_app").update({"data_vencimento": str(nova_data)}).eq("id", aluno['id']).execute()
+                    st.rerun()
+                label = "🔒 Bloquear" if aluno['status_pagamento'] else "🔓 Liberar"
+                if st.button(label, key=f"a_{aluno['id']}", use_container_width=True):
+                    supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
+                    st.rerun()
 
 # 🚀 DASHBOARD CLIENTE (v1 Original)
 else:
@@ -119,7 +125,6 @@ else:
             st.code(chave_pix_visivel)
         st.stop()
 
-    # DADOS E GRÁFICOS
     df = pd.DataFrame([
         {"Data": "24/01", "Treino": "Rodagem", "Km": 10, "Tempo": 60, "FC": 145},
         {"Data": "26/01", "Treino": "Trote", "Km": 5, "Tempo": 35, "FC": 0},
@@ -128,12 +133,12 @@ else:
     df['FC_Final'] = df['FC'].apply(lambda x: 130 if x <= 0 else x)
     df['TRIMP'] = df['Tempo'] * (df['FC_Final'] / 100)
 
-    st.subheader("📋 Planilha")
+    st.subheader("📋 Planilha de Treinos")
     st.dataframe(df[['Data', 'Treino', 'Km', 'Tempo', 'FC_Final']], use_container_width=True, hide_index=True)
 
     g1, g2 = st.columns(2)
-    with g1: st.plotly_chart(px.bar(df, x='Data', y='TRIMP', title="TRIMP"), use_container_width=True)
+    with g1: st.plotly_chart(px.bar(df, x='Data', y='TRIMP', title="Carga TRIMP"), use_container_width=True)
     with g2: 
-        fig = px.line(df, x='Data', y='FC_Final', title="FC Média", markers=True)
+        fig = px.line(df, x='Data', y='FC_Final', title="Frequência Cardíaca", markers=True)
         fig.add_hline(y=130, line_dash="dash")
         st.plotly_chart(fig, use_container_width=True)
