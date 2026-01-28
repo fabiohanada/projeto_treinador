@@ -166,7 +166,7 @@ else:
                 <img src="{qr_url}" style="border: 10px solid white; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
                 <p style="margin-top:15px; font-size: 0.9em;"><b>Chave PIX:</b></p>
                 <span class="pix-chave">{chave_pix_visivel}</span>
-                <p style="font-size: 0.9em; color: #555;"><b>Valor: R$ 00,00</b></p>
+                <p style="font-size: 0.9em; color: #555;"><b>Valor: R$ 9,99</b></p>
             </div>
         """, unsafe_allow_html=True)
         
