@@ -1,27 +1,16 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+import plotly.express as px
+from datetime import datetime, timedelta
 import hashlib, urllib.parse
 from supabase import create_client
 
-# 1. CONFIGURAÇÕES (Layout Fiel 27/01)
+# 1. CONFIGURAÇÕES
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONFIGURAÇÃO PIX ---
 chave_pix_visivel = "fabioh1979@hotmail.com"
 pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
-
-# CSS para restaurar o visual exato e tabelas limpas
-st.markdown("""
-    <style>
-    span.no-style { text-decoration: none !important; color: inherit !important; border-bottom: none !important; }
-    [data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stVerticalBlock"] { max-width: 450px; margin: 0 auto; }
-    .stButton>button { border-radius: 5px; }
-    
-    /* Estilo das tabelas antigas */
-    .stDataFrame { border: 1px solid #e6e9ef; border-radius: 10px; }
-    </style>
-    """, unsafe_allow_html=True)
 
 # --- CONEXÕES ---
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
@@ -59,13 +48,6 @@ if not st.session_state.logado:
 user = st.session_state.user_info
 eh_admin = user.get('is_admin', False)
 
-with st.sidebar:
-    st.markdown(f"### 👤 {user['nome']}")
-    st.divider()
-    if st.button("🚪 Sair", use_container_width=True):
-        st.session_state.logado = False
-        st.rerun()
-
 # 👨‍🏫 PAINEL ADMIN (Layout Fábio Hanada Original)
 if eh_admin:
     st.title("👨‍🏫 Painel Administrativo")
@@ -75,52 +57,64 @@ if eh_admin:
             with st.container(border=True):
                 c_info, c_btns = st.columns([3, 1])
                 with c_info:
-                    pago_badge = "✅" if aluno['status_pagamento'] else "❌"
-                    st.markdown(f"**Aluno:** {aluno['nome']} {pago_badge}")
+                    st.markdown(f"**Aluno:** {aluno['nome']}")
                     st.write(f"**Vencimento:** {formatar_data_br(aluno['data_vencimento'])}")
-                    nova_data = st.date_input("Alterar data", value=datetime.strptime(aluno['data_vencimento'], '%Y-%m-%d'), key=f"d_{aluno['id']}")
                 with c_btns:
-                    if st.button("💾 Salvar", key=f"s_{aluno['id']}", use_container_width=True):
-                        supabase.table("usuarios_app").update({"data_vencimento": str(nova_data)}).eq("id", aluno['id']).execute()
-                        st.rerun()
                     label = "🔒 Bloquear" if aluno['status_pagamento'] else "🔓 Liberar"
                     if st.button(label, key=f"a_{aluno['id']}", use_container_width=True):
                         supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                         st.rerun()
 
-# 🚀 DASHBOARD CLIENTE (Formato Antigo de Tabela)
+# 🚀 DASHBOARD CLIENTE
 else:
-    st.title("🚀 Meus Treinos")
+    st.title(f"🚀 Painel de Treino: {user['nome']}")
     pago = user.get('status_pagamento', False)
     
-    with st.expander("💳 Assinatura e Pagamento", expanded=not pago):
-        if not pago:
-            payload_encoded = urllib.parse.quote(pix_copia_e_cola)
-            qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={payload_encoded}"
-            st.markdown(f"""
-                <div style="text-align:center; border:2px solid #00bfa5; padding:20px; border-radius:15px;">
-                    <h3>💳 Renovação via PIX (R$ 9,99)</h3>
-                    <img src="{qr_url}" width="200"><br><br>
-                    <code style="padding:10px; background:#f0f2f6; border-radius:5px;">{chave_pix_visivel}</code>
-                </div>
-            """, unsafe_allow_html=True)
-            st.stop()
+    if not pago:
+        payload_encoded = urllib.parse.quote(pix_copia_e_cola)
+        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={payload_encoded}"
+        st.warning("Assinatura Pendente")
+        st.markdown(f'<div style="text-align:center;"><img src="{qr_url}"><br><code>{chave_pix_visivel}</code></div>', unsafe_allow_html=True)
+        st.stop()
 
-    st.success(f"Olá {user['nome']}, sua planilha de treinos atualizada:")
+    # --- DADOS DE TREINO (Simulados para Maria) ---
+    # Aqui aplicamos a regra: se FC for 0 ou None, vira 130
+    dados_maria = [
+        {"Data": "24/01", "Treino": "Rodagem", "Km": 10, "Tempo": 60, "FC": 145},
+        {"Data": "25/01", "Treino": "Intervalado", "Km": 8, "Tempo": 45, "FC": 160},
+        {"Data": "26/01", "Treino": "Trote", "Km": 5, "Tempo": 35, "FC": 0}, # Sem frequência
+        {"Data": "27/01", "Treino": "Longo", "Km": 15, "Tempo": 95, "FC": 138},
+    ]
+    
+    df = pd.DataFrame(dados_maria)
+    # REGRA DOS 130 BPM
+    df['FC_Final'] = df['FC'].apply(lambda x: 130 if x <= 0 else x)
+    # CÁLCULO TRIMP SIMPLIFICADO (Tempo x Intensidade baseada na FC)
+    df['TRIMP'] = df['Tempo'] * (df['FC_Final'] / 100)
 
-    # --- TABELA DE TREINOS FORMATO ANTIGO ---
-    data_treinos = {
-        "Data": ["28/01/2026", "29/01/2026", "30/01/2026", "31/01/2026"],
-        "Treino": ["Adaptação e Mobilidade", "Fortalecimento Core", "Resistência Aeróbica", "Técnica e Corrida"],
-        "Distância": ["5.0 km", "---", "8.2 km", "3.0 km"],
-        "Tempo": ["32:10", "45:00", "54:30", "25:00"],
-        "Ritmo (Pace)": ["6:26 /km", "N/A", "6:38 /km", "8:20 /km"]
-    }
-    
-    df_treinos = pd.DataFrame(data_treinos)
-    
-    # Exibição em tabela limpa (Format antiga)
-    st.dataframe(df_treinos, use_container_width=True, hide_index=True)
+    # --- VISUALIZAÇÃO ---
+    tab1, tab2 = st.tabs(["📋 Planilha de Treinos", "📊 Gráficos de Evolução"])
+
+    with tab1:
+        st.subheader("Últimas Atividades")
+        st.dataframe(df[['Data', 'Treino', 'Km', 'Tempo', 'FC_Final']], use_container_width=True, hide_index=True)
+
+    with tab2:
+        col_g1, col_g2 = st.columns(2)
+        
+        with col_g1:
+            st.write("**Carga de Treino (TRIMP)**")
+            fig_trimp = px.bar(df, x='Data', y='TRIMP', color_discrete_sequence=['#00bfa5'])
+            st.plotly_chart(fig_trimp, use_container_width=True)
+            
+
+        with col_g2:
+            st.write("**Frequência Cardíaca (Média)**")
+            # Linha de referência nos 130
+            fig_fc = px.line(df, x='Data', y='FC_Final', markers=True)
+            fig_fc.add_hline(y=130, line_dash="dash", annotation_text="Base 130 bpm")
+            st.plotly_chart(fig_fc, use_container_width=True)
+            
 
     st.divider()
-    st.info("💡 Clique em qualquer linha para ver detalhes ou exportar os dados.")
+    st.info("💡 Nota: Treinos sem registro de frequência cardíaca são calculados com base em 130 bpm.")
