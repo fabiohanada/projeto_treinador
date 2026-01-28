@@ -11,7 +11,7 @@ st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="�
 # --- CHAVES PIX (EDITE AQUI) ---
 chave_pix_visivel = "fabioh1979@hotmail.com"
 # DICA: Cole o código PIX Copia e Cola completo aqui dentro das aspas
-pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E3" 
+pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
 
 # CSS para manter o layout idêntico e estilizar os alertas
 st.markdown("""
