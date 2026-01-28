@@ -4,32 +4,22 @@ from datetime import datetime
 import hashlib, urllib.parse
 from supabase import create_client
 
-# 1. CONFIGURAÇÕES (Estilo Estável 27/01)
+# 1. CONFIGURAÇÕES (Layout Fiel 27/01)
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONFIGURAÇÃO PIX ---
 chave_pix_visivel = "fabioh1979@hotmail.com"
 pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
 
-# CSS para restaurar o visual e criar os cards do Strava
+# CSS para restaurar o visual exato e tabelas limpas
 st.markdown("""
     <style>
     span.no-style { text-decoration: none !important; color: inherit !important; border-bottom: none !important; }
     [data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stVerticalBlock"] { max-width: 450px; margin: 0 auto; }
     .stButton>button { border-radius: 5px; }
     
-    /* Estilo Card Strava */
-    .strava-card {
-        background-color: #ffffff;
-        border-left: 5px solid #FC4C02; /* Laranja Strava */
-        padding: 15px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        margin-bottom: 15px;
-    }
-    .strava-title { color: #FC4C02; font-weight: bold; font-size: 1.1em; margin-bottom: 5px; }
-    .strava-metrics { display: flex; gap: 20px; font-size: 0.9em; color: #555; }
-    .metric-item b { color: #000; font-size: 1.1em; }
+    /* Estilo das tabelas antigas */
+    .stDataFrame { border: 1px solid #e6e9ef; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -76,7 +66,7 @@ with st.sidebar:
         st.session_state.logado = False
         st.rerun()
 
-# 👨‍🏫 PAINEL ADMIN (Layout 27/01)
+# 👨‍🏫 PAINEL ADMIN (Layout Fábio Hanada Original)
 if eh_admin:
     st.title("👨‍🏫 Painel Administrativo")
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
@@ -85,19 +75,20 @@ if eh_admin:
             with st.container(border=True):
                 c_info, c_btns = st.columns([3, 1])
                 with c_info:
-                    pago_badge = "<span style='background:#00bfa5;color:white;padding:2px 8px;border-radius:5px;font-size:0.8em;'>PAGO</span>" if aluno['status_pagamento'] else ""
-                    st.markdown(f"**Aluno:** {aluno['nome']} {pago_badge}", unsafe_allow_html=True)
+                    pago_badge = "✅" if aluno['status_pagamento'] else "❌"
+                    st.markdown(f"**Aluno:** {aluno['nome']} {pago_badge}")
                     st.write(f"**Vencimento:** {formatar_data_br(aluno['data_vencimento'])}")
-                    nova_data = st.date_input("Novo Vencimento", value=datetime.strptime(aluno['data_vencimento'], '%Y-%m-%d'), key=f"d_{aluno['id']}")
+                    nova_data = st.date_input("Alterar data", value=datetime.strptime(aluno['data_vencimento'], '%Y-%m-%d'), key=f"d_{aluno['id']}")
                 with c_btns:
                     if st.button("💾 Salvar", key=f"s_{aluno['id']}", use_container_width=True):
                         supabase.table("usuarios_app").update({"data_vencimento": str(nova_data)}).eq("id", aluno['id']).execute()
                         st.rerun()
-                    if st.button("🔓 Liberar/Bloquear", key=f"a_{aluno['id']}", use_container_width=True):
+                    label = "🔒 Bloquear" if aluno['status_pagamento'] else "🔓 Liberar"
+                    if st.button(label, key=f"a_{aluno['id']}", use_container_width=True):
                         supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                         st.rerun()
 
-# 🚀 DASHBOARD CLIENTE (Estilo Strava)
+# 🚀 DASHBOARD CLIENTE (Formato Antigo de Tabela)
 else:
     st.title("🚀 Meus Treinos")
     pago = user.get('status_pagamento', False)
@@ -107,32 +98,29 @@ else:
             payload_encoded = urllib.parse.quote(pix_copia_e_cola)
             qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={payload_encoded}"
             st.markdown(f"""
-                <div class="pix-card">
+                <div style="text-align:center; border:2px solid #00bfa5; padding:20px; border-radius:15px;">
                     <h3>💳 Renovação via PIX (R$ 9,99)</h3>
-                    <img src="{qr_url}" width="200">
-                    <p class="pix-chave">{chave_pix_visivel}</p>
+                    <img src="{qr_url}" width="200"><br><br>
+                    <code style="padding:10px; background:#f0f2f6; border-radius:5px;">{chave_pix_visivel}</code>
                 </div>
             """, unsafe_allow_html=True)
             st.stop()
 
-    st.success(f"Olá {user['nome']}, veja seus últimos treinos:")
+    st.success(f"Olá {user['nome']}, sua planilha de treinos atualizada:")
 
-    # --- LISTA DE TREINOS TESTE (ESTILO STRAVA) ---
-    treinos = [
-        {"nome": "Adaptação e Mobilidade", "dist": "5.0 km", "tempo": "32:10", "pace": "6:26 /km"},
-        {"nome": "Fortalecimento Core e Estabilidade", "dist": "---", "tempo": "45:00", "pace": "N/A"},
-        {"nome": "Resistência Aeróbica (Trote)", "dist": "8.2 km", "tempo": "54:30", "pace": "6:38 /km"},
-        {"nome": "Técnica de Corrida e Educativos", "dist": "3.0 km", "tempo": "25:00", "pace": "8:20 /km"},
-    ]
+    # --- TABELA DE TREINOS FORMATO ANTIGO ---
+    data_treinos = {
+        "Data": ["28/01/2026", "29/01/2026", "30/01/2026", "31/01/2026"],
+        "Treino": ["Adaptação e Mobilidade", "Fortalecimento Core", "Resistência Aeróbica", "Técnica e Corrida"],
+        "Distância": ["5.0 km", "---", "8.2 km", "3.0 km"],
+        "Tempo": ["32:10", "45:00", "54:30", "25:00"],
+        "Ritmo (Pace)": ["6:26 /km", "N/A", "6:38 /km", "8:20 /km"]
+    }
+    
+    df_treinos = pd.DataFrame(data_treinos)
+    
+    # Exibição em tabela limpa (Format antiga)
+    st.dataframe(df_treinos, use_container_width=True, hide_index=True)
 
-    for t in treinos:
-        st.markdown(f"""
-            <div class="strava-card">
-                <div class="strava-title">🏃‍♂️ {t['nome']}</div>
-                <div class="strava-metrics">
-                    <div class="metric-item">Distância<br><b>{t['dist']}</b></div>
-                    <div class="metric-item">Tempo<br><b>{t['tempo']}</b></div>
-                    <div class="metric-item">Ritmo Médio<br><b>{t['pace']}</b></div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+    st.divider()
+    st.info("💡 Clique em qualquer linha para ver detalhes ou exportar os dados.")
