@@ -2,14 +2,15 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-import os, requests, hashlib
+import os, requests, hashlib, urllib.parse
 from supabase import create_client
 
 # 1. CONFIGURAÇÕES (Mantendo o visual do dia 27/01)
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
 # --- CHAVES PIX (EDITE AQUI) ---
-chave_pix_visivel = "fabioh1979@hotmail.com"
+chave_pix_visivel = "seu-email@pix.com"
+# DICA: Cole o código PIX Copia e Cola completo aqui dentro das aspas
 pix_copia_e_cola = "00020126330014BR.GOV.BCB.PIX0111suachavepix" 
 
 # CSS para manter o layout idêntico e estilizar os alertas
@@ -111,7 +112,7 @@ with st.sidebar:
         st.session_state.logado = False
         st.rerun()
 
-# 👨‍🏫 PAINEL ADMIN (Com Alerta de Pagamento)
+# 👨‍🏫 PAINEL ADMIN
 if eh_admin:
     st.title("👨‍🏫 Painel Administrativo")
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
@@ -121,7 +122,6 @@ if eh_admin:
             with st.container(border=True):
                 c_info, c_btns = st.columns([3, 1])
                 with c_info:
-                    # ALERTA DE PAGAMENTO AQUI: Se status for true, aparece o selo PAGO
                     pago_badge = "<span class='status-pago'>PAGO</span>" if aluno['status_pagamento'] else ""
                     st.markdown(f"**Aluno:** {aluno['nome']} {pago_badge}", unsafe_allow_html=True)
                     st.markdown(f"**E-mail:** <span class='no-style'>{aluno['email']}</span>", unsafe_allow_html=True)
@@ -142,7 +142,7 @@ if eh_admin:
                         supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                         st.rerun()
 
-# 🚀 DASHBOARD CLIENTE (Mensagem de Comprovante Removida)
+# 🚀 DASHBOARD CLIENTE
 else:
     st.title("🚀 Meus Treinos")
     v_str = user.get('data_vencimento', "2000-01-01")
@@ -157,16 +157,20 @@ else:
         
         st.markdown("---")
         
-        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=150x150&data={pix_copia_e_cola}"
+        # Correção do QR Code usando URLLIB para evitar erros de caracteres
+        payload_pix = urllib.parse.quote(pix_copia_e_cola)
+        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={payload_pix}"
         
         st.markdown(f"""
             <div class="pix-card">
                 <h3 style="margin-top:0; color:#333;">💳 Renovação via PIX</h3>
                 <p>Escaneie o QR Code abaixo para pagar:</p>
-                <img src="{qr_url}" style="border: 10px solid white; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
+                <div style="background-color: white; padding: 10px; display: inline-block; border-radius: 10px;">
+                    <img src="{qr_url}" width="200" alt="QR Code PIX">
+                </div>
                 <p style="margin-top:15px; font-size: 0.9em;"><b>Chave PIX:</b></p>
                 <span class="pix-chave">{chave_pix_visivel}</span>
-                <p style="font-size: 0.9em; color: #555;"><b>Valor: R$ 9,99</b></p>
+                <p style="font-size: 0.9em; color: #555;"><b>Valor: R$ 00,00</b></p>
             </div>
         """, unsafe_allow_html=True)
         
