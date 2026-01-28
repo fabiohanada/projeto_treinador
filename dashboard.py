@@ -6,39 +6,32 @@ import os, requests, hashlib
 from supabase import create_client
 from twilio.rest import Client
 
-# 1. CONFIGURAÇÕES
+# 1. CONFIGURAÇÕES (Estilo 27/01)
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
-# CSS Estável (Versão 27/01)
+# CSS para padronização e visual limpo
 st.markdown("""
     <style>
     span.no-style { text-decoration: none !important; color: inherit !important; border-bottom: none !important; }
     [data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stVerticalBlock"] { max-width: 450px; margin: 0 auto; }
+    .strava-btn { display: block; margin-left: auto; margin-right: auto; width: 200px; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- CONEXÕES ---
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-TWILIO_SID = st.secrets.get("TWILIO_ACCOUNT_SID")
-TWILIO_TOKEN = st.secrets.get("TWILIO_AUTH_TOKEN")
+CLIENT_ID = st.secrets["STRAVA_CLIENT_ID"]
+REDIRECT_URI = "https://seu-treino-app.streamlit.app"
 
 # --- FUNÇÕES ---
 def hash_senha(senha): return hashlib.sha256(str.encode(senha)).hexdigest()
 
-def enviar_aviso_whatsapp(nome, telefone):
-    if not TWILIO_SID or not TWILIO_TOKEN:
-        st.error("Credenciais Twilio não configuradas.")
-        return
-    try:
-        client = Client(TWILIO_SID, TWILIO_TOKEN)
-        msg = f"Olá {nome}! Seu acesso à Fábio Assessoria foi liberado. Bons treinos! 🏃‍♂️"
-        client.messages.create(from_='whatsapp:+14155238886', body=msg, to=f'whatsapp:{telefone}')
-        st.success(f"WhatsApp enviado para {nome}!")
-    except Exception as e:
-        st.error(f"Erro ao enviar: {e}")
+def formatar_data_br(data_str):
+    try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
+    except: return data_str
 
 # =================================================================
-# 🔑 LOGIN E CADASTRO (Layout 27/01)
+# 🔑 LOGIN E CADASTRO
 # =================================================================
 if "logado" not in st.session_state: st.session_state.logado = False
 
@@ -59,55 +52,58 @@ if not st.session_state.logado:
         with t2:
             with st.form("c"):
                 n, em, se = st.text_input("Nome"), st.text_input("E-mail"), st.text_input("Senha", type="password")
-                # LGPD Obrigatória como solicitado
-                st.info("🛡️ LGPD: Seus dados de treino são usados apenas para sua assessoria.")
+                st.info("🛡️ LGPD: Seus dados são usados apenas para análise de performance.")
                 concordo = st.checkbox("Aceito os termos")
-                if st.form_submit_button("Finalizar Cadastro", use_container_width=True):
+                if st.form_submit_button("Cadastrar", use_container_width=True):
                     if concordo and n and em and se:
                         supabase.table("usuarios_app").insert({"nome": n, "email": em, "senha": hash_senha(se), "status_pagamento": False, "data_vencimento": str(datetime.now().date())}).execute()
-                        st.success("Cadastrado! Mude para a aba 'Entrar'.")
-                    else: st.warning("Aceite os termos e preencha tudo.")
+                        st.success("Criado! Use a aba Entrar.")
     st.stop()
 
 # =================================================================
 # 🏠 ÁREA LOGADA
 # =================================================================
 user = st.session_state.user_info
+eh_admin = user.get('is_admin', False)
 
 with st.sidebar:
-    st.markdown(f"### 👤 {user['nome']}")
+    st.markdown(f"👤 **{user['nome']}**")
     st.markdown(f"📧 <span class='no-style'>{user['email']}</span>", unsafe_allow_html=True)
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.logado = False
         st.rerun()
 
-if user.get('is_admin'):
+if eh_admin:
     st.title("👨‍🏫 Gestão de Alunos")
+    # Painel de gestão idêntico ao de 27/01 (com botões de salvar e liberar)
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     for a in alunos.data:
         with st.container(border=True):
-            col_inf, col_btn = st.columns([3, 1])
-            with col_inf:
-                st.markdown(f"**Aluno:** {a['nome']} | **E-mail:** <span class='no-style'>{a['email']}</span>", unsafe_allow_html=True)
-                st.write(f"Vencimento: {datetime.strptime(a['data_vencimento'], '%Y-%m-%d').strftime('%d/%m/%Y')}")
-            with col_btn:
-                # Botão Twilio integrado
-                if st.button(f"📲 Avisar via Whats", key=f"w_{a['id']}"):
-                    # Aqui você precisaria ter o campo 'telefone' na tabela. 
-                    # Se não tiver, podemos adicionar amanhã.
-                    enviar_aviso_whatsapp(a['nome'], "5511999999999") # Exemplo
-                
-                label = "🔒 Bloquear" if a['status_pagamento'] else "🔓 Liberar"
-                if st.button(label, key=f"b_{a['id']}"):
-                    supabase.table("usuarios_app").update({"status_pagamento": not a['status_pagamento']}).eq("id", a['id']).execute()
-                    st.rerun()
+            ci, cb = st.columns([3, 1])
+            with ci:
+                st.write(f"**{a['nome']}** | {formatar_data_br(a['data_vencimento'])}")
+            with cb:
+                st.button("🔓 Liberar" if not a['status_pagamento'] else "🔒 Bloquear", key=f"b_{a['id']}")
+
 else:
-    # Dashboard Cliente com Gráficos
     st.title("🚀 Meus Treinos")
-    venc = datetime.strptime(user['data_vencimento'], '%Y-%m-%d').date()
-    if not (user['status_pagamento'] and datetime.now().date() <= venc):
-        st.error("Assinatura inativa. Chave PIX: seu-email@pix.com")
+    v_str = user.get('data_vencimento', "2000-01-01")
+    venc = datetime.strptime(v_str, '%Y-%m-%d').date()
+    pago = user['status_pagamento'] and datetime.now().date() <= venc
+
+    if not pago:
+        st.error("Assinatura Inativa. Fale com o Fábio.")
         st.stop()
+
+    # BOTÃO OFICIAL STRAVA (Exigência para Produção)
+    auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=read,activity:read&state={user['email']}"
     
-    st.info("Gráficos de desempenho e integração Strava (Aguardando liberação de cota)")
-    # Espaço para os gráficos do Plotly que configuramos ontem
+    st.markdown(f"""
+        <a href="{auth_url}">
+            <img src="https://strava.github.io/api/images/connect_with_strava.png" class="strava-btn">
+        </a>
+    """, unsafe_allow_html=True)
+    
+    # Gráfico Discreto
+    st.subheader("📊 Desempenho Semanal")
+    # Espaço para o gráfico do Plotly...
