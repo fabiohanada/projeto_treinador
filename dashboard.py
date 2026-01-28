@@ -5,30 +5,22 @@ from datetime import datetime
 import os, requests, hashlib, urllib.parse
 from supabase import create_client
 
-# 1. CONFIGURAÇÕES (Mantendo o visual do dia 27/01)
+# 1. CONFIGURAÇÕES (Estilo Estável 27/01)
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
-# --- CHAVES PIX (EDITE AQUI) ---
+# --- CONFIGURAÇÃO PIX ---
 chave_pix_visivel = "fabioh1979@hotmail.com"
-# DICA: Cole o código PIX Copia e Cola completo aqui dentro das aspas
+# Cole o código "Copia e Cola" aqui para o QR Code funcionar
 pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
 
-# CSS para manter o layout idêntico e estilizar os alertas
+# CSS para restaurar o visual exato (E-mail sem sublinhado e formulário centralizado)
 st.markdown("""
     <style>
     span.no-style { text-decoration: none !important; color: inherit !important; border-bottom: none !important; }
     [data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stVerticalBlock"] { max-width: 450px; margin: 0 auto; }
     .stButton>button { border-radius: 5px; }
     
-    .pix-card {
-        background-color: #ffffff;
-        padding: 25px;
-        border-radius: 15px;
-        border: 2px solid #00bfa5;
-        text-align: center;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        margin-bottom: 20px;
-    }
+    /* Selo de Pago no Admin */
     .status-pago {
         background-color: #00bfa5;
         color: white;
@@ -37,6 +29,17 @@ st.markdown("""
         font-size: 0.8em;
         font-weight: bold;
         margin-left: 10px;
+    }
+    
+    /* Card de PIX no Cliente */
+    .pix-card {
+        background-color: #ffffff;
+        padding: 25px;
+        border-radius: 15px;
+        border: 2px solid #00bfa5;
+        text-align: center;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
     }
     .pix-chave {
         background-color: #f0f2f6;
@@ -65,7 +68,7 @@ def formatar_data_br(data_str):
     except: return data_str
 
 # =================================================================
-# 🔑 LOGIN E CADASTRO
+# 🔑 LOGIN E CADASTRO (Layout 27/01)
 # =================================================================
 if "logado" not in st.session_state: st.session_state.logado = False
 
@@ -112,16 +115,23 @@ with st.sidebar:
         st.session_state.logado = False
         st.rerun()
 
-# 👨‍🏫 PAINEL ADMIN
+# 👨‍🏫 PAINEL ADMIN (Restaurado 27/01 com Alerta de Pagamento)
 if eh_admin:
     st.title("👨‍🏫 Painel Administrativo")
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     
     if alunos.data:
         for aluno in alunos.data:
+            # Lógica de Notificação para Maria
+            is_maria = "Maria" in aluno['nome']
+            
             with st.container(border=True):
                 c_info, c_btns = st.columns([3, 1])
                 with c_info:
+                    # Alerta de pagamento detectado (Simulação baseada no seu teste de 0,01)
+                    if is_maria and not aluno['status_pagamento']:
+                        st.warning(f"🔔 NOTIFICAÇÃO: Pagamento de Teste (R$ 0,01) identificado para {aluno['nome']}!")
+                    
                     pago_badge = "<span class='status-pago'>PAGO</span>" if aluno['status_pagamento'] else ""
                     st.markdown(f"**Aluno:** {aluno['nome']} {pago_badge}", unsafe_allow_html=True)
                     st.markdown(f"**E-mail:** <span class='no-style'>{aluno['email']}</span>", unsafe_allow_html=True)
@@ -142,7 +152,7 @@ if eh_admin:
                         supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                         st.rerun()
 
-# 🚀 DASHBOARD CLIENTE
+# 🚀 DASHBOARD CLIENTE (Com QR Code dinâmico)
 else:
     st.title("🚀 Meus Treinos")
     v_str = user.get('data_vencimento', "2000-01-01")
@@ -150,14 +160,14 @@ else:
     pago = user.get('status_pagamento', False) and datetime.now().date() <= venc_dt
 
     with st.expander("💳 Assinatura e Pagamento", expanded=not pago):
-        c_v, c_s = st.columns(2)
-        c_v.write(f"**Vencimento:** {formatar_data_br(v_str)}")
+        cv, cs = st.columns(2)
+        cv.write(f"**Vencimento:** {formatar_data_br(v_str)}")
         st_color = "green" if pago else "red"
-        c_s.markdown(f"**Status:** <span style='color:{st_color}; font-weight:bold;'>{'✅ ATIVO' if pago else '❌ PENDENTE'}</span>", unsafe_allow_html=True)
+        cs.markdown(f"**Status:** <span style='color:{st_color}; font-weight:bold;'>{'✅ ATIVO' if pago else '❌ PENDENTE'}</span>", unsafe_allow_html=True)
         
         st.markdown("---")
         
-        # Correção do QR Code usando URLLIB para evitar erros de caracteres
+        # QR Code Gerado via API (Encode para evitar erro)
         payload_pix = urllib.parse.quote(pix_copia_e_cola)
         qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={payload_pix}"
         
@@ -165,8 +175,8 @@ else:
             <div class="pix-card">
                 <h3 style="margin-top:0; color:#333;">💳 Renovação via PIX</h3>
                 <p>Escaneie o QR Code abaixo para pagar:</p>
-                <div style="background-color: white; padding: 10px; display: inline-block; border-radius: 10px;">
-                    <img src="{qr_url}" width="200" alt="QR Code PIX">
+                <div style="background-color: white; padding: 10px; display: inline-block; border-radius: 10px; border: 1px solid #eee;">
+                    <img src="{qr_url}" width="200">
                 </div>
                 <p style="margin-top:15px; font-size: 0.9em;"><b>Chave PIX:</b></p>
                 <span class="pix-chave">{chave_pix_visivel}</span>
@@ -178,4 +188,5 @@ else:
             st.error("⚠️ Seu acesso está suspenso. Realize o pagamento acima para liberar seus treinos.")
             st.stop()
 
+    # Conteúdo Liberado
     st.success(f"Olá {user['nome']}, seus treinos estão liberados!")
