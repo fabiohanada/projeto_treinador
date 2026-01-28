@@ -6,15 +6,15 @@ import os, requests, hashlib
 from supabase import create_client
 from twilio.rest import Client
 
-# 1. CONFIGURAÇÕES (Estilo 27/01)
+# 1. CONFIGURAÇÕES (Estilo Estável 27/01)
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
-# CSS para padronização e visual limpo
+# CSS para restaurar o visual exato (E-mail sem sublinhado e formulário centralizado)
 st.markdown("""
     <style>
     span.no-style { text-decoration: none !important; color: inherit !important; border-bottom: none !important; }
     [data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stVerticalBlock"] { max-width: 450px; margin: 0 auto; }
-    .strava-btn { display: block; margin-left: auto; margin-right: auto; width: 200px; }
+    .stButton>button { border-radius: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -31,7 +31,7 @@ def formatar_data_br(data_str):
     except: return data_str
 
 # =================================================================
-# 🔑 LOGIN E CADASTRO
+# 🔑 LOGIN E CADASTRO (Visual 27/01)
 # =================================================================
 if "logado" not in st.session_state: st.session_state.logado = False
 
@@ -39,25 +39,30 @@ if not st.session_state.logado:
     st.markdown("<br><h1 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
     with c2:
-        t1, t2 = st.tabs(["🔑 Entrar", "📝 Cadastro"])
+        t1, t2 = st.tabs(["🔑 Entrar", "📝 Novo Cadastro"])
         with t1:
-            with st.form("l"):
+            with st.form("login_form"):
                 e = st.text_input("E-mail")
                 s = st.text_input("Senha", type="password")
-                if st.form_submit_button("Acessar", use_container_width=True):
+                if st.form_submit_button("Acessar Sistema", use_container_width=True):
                     u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
                     if u.data:
                         st.session_state.logado, st.session_state.user_info = True, u.data[0]
                         st.rerun()
         with t2:
-            with st.form("c"):
-                n, em, se = st.text_input("Nome"), st.text_input("E-mail"), st.text_input("Senha", type="password")
-                st.info("🛡️ LGPD: Seus dados são usados apenas para análise de performance.")
-                concordo = st.checkbox("Aceito os termos")
-                if st.form_submit_button("Cadastrar", use_container_width=True):
-                    if concordo and n and em and se:
-                        supabase.table("usuarios_app").insert({"nome": n, "email": em, "senha": hash_senha(se), "status_pagamento": False, "data_vencimento": str(datetime.now().date())}).execute()
-                        st.success("Criado! Use a aba Entrar.")
+            with st.form("cadastro_form"):
+                n_c = st.text_input("Nome Completo")
+                e_c = st.text_input("E-mail")
+                s_c = st.text_input("Crie uma Senha", type="password")
+                st.markdown("---")
+                st.markdown("### 🛡️ Privacidade e LGPD")
+                st.info("Seus dados de treino serão usados apenas para consultoria esportiva.")
+                concordo = st.checkbox("Li e aceito os termos.")
+                if st.form_submit_button("Finalizar Cadastro", use_container_width=True):
+                    if concordo and n_c and e_c and s_c:
+                        supabase.table("usuarios_app").insert({"nome": n_c, "email": e_c, "senha": hash_senha(s_c), "is_admin": False, "status_pagamento": False, "data_vencimento": str(datetime.now().date())}).execute()
+                        st.success("Conta criada! Mude para a aba Entrar.")
+                    else: st.warning("Preencha tudo e aceite a LGPD.")
     st.stop()
 
 # =================================================================
@@ -67,43 +72,54 @@ user = st.session_state.user_info
 eh_admin = user.get('is_admin', False)
 
 with st.sidebar:
-    st.markdown(f"👤 **{user['nome']}**")
+    st.markdown(f"### 👤 {user['nome']}")
     st.markdown(f"📧 <span class='no-style'>{user['email']}</span>", unsafe_allow_html=True)
+    st.divider()
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.logado = False
         st.rerun()
 
+# 👨‍🏫 PAINEL ADMIN (RESTAURADO DIA 27/01)
 if eh_admin:
-    st.title("👨‍🏫 Gestão de Alunos")
-    # Painel de gestão idêntico ao de 27/01 (com botões de salvar e liberar)
+    st.title("👨‍🏫 Painel Administrativo")
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
-    for a in alunos.data:
-        with st.container(border=True):
-            ci, cb = st.columns([3, 1])
-            with ci:
-                st.write(f"**{a['nome']}** | {formatar_data_br(a['data_vencimento'])}")
-            with cb:
-                st.button("🔓 Liberar" if not a['status_pagamento'] else "🔒 Bloquear", key=f"b_{a['id']}")
+    
+    if alunos.data:
+        for aluno in alunos.data:
+            with st.container(border=True):
+                c_info, c_btns = st.columns([3, 1])
+                with c_info:
+                    st.markdown(f"**Aluno:** {aluno['nome']}")
+                    st.markdown(f"**E-mail:** <span class='no-style'>{aluno['email']}</span>", unsafe_allow_html=True)
+                    st.write(f"**Vencimento Atual:** {formatar_data_br(aluno['data_vencimento'])}")
+                    
+                    # Alinhamento da Alteração de Vencimento (Espaço Pequeno)
+                    cl1, cl2 = st.columns([0.45, 0.55])
+                    cl1.markdown("**Alterar Vencimento:**")
+                    nova_data = cl2.date_input("Data", value=datetime.strptime(aluno['data_vencimento'], '%Y-%m-%d'),
+                                              key=f"d_{aluno['id']}", format="DD/MM/YYYY", label_visibility="collapsed")
+                
+                with c_btns:
+                    if st.button("💾 Salvar", key=f"s_{aluno['id']}", use_container_width=True):
+                        supabase.table("usuarios_app").update({"data_vencimento": str(nova_data)}).eq("id", aluno['id']).execute()
+                        st.rerun()
+                    
+                    label_status = "🔒 Bloquear" if aluno['status_pagamento'] else "🔓 Liberar"
+                    if st.button(label_status, key=f"a_{aluno['id']}", use_container_width=True):
+                        supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
+                        st.rerun()
 
+# 🚀 DASHBOARD CLIENTE
 else:
     st.title("🚀 Meus Treinos")
     v_str = user.get('data_vencimento', "2000-01-01")
-    venc = datetime.strptime(v_str, '%Y-%m-%d').date()
-    pago = user['status_pagamento'] and datetime.now().date() <= venc
+    pago = user['status_pagamento'] and datetime.now().date() <= datetime.strptime(v_str, '%Y-%m-%d').date()
 
-    if not pago:
-        st.error("Assinatura Inativa. Fale com o Fábio.")
-        st.stop()
+    with st.expander("💳 Assinatura", expanded=not pago):
+        st.write(f"**Vencimento:** {formatar_data_br(v_str)}")
+        if not pago: 
+            st.error("Acesso bloqueado. Fale com o Fábio.")
+            st.stop()
 
-    # BOTÃO OFICIAL STRAVA (Exigência para Produção)
-    auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=read,activity:read&state={user['email']}"
-    
-    st.markdown(f"""
-        <a href="{auth_url}">
-            <img src="https://strava.github.io/api/images/connect_with_strava.png" class="strava-btn">
-        </a>
-    """, unsafe_allow_html=True)
-    
-    # Gráfico Discreto
-    st.subheader("📊 Desempenho Semanal")
-    # Espaço para o gráfico do Plotly...
+    # Espaço para Strava e Gráficos (Apenas se pago)
+    st.write("Aqui aparecerão seus gráficos e treinos sincronizados.")
