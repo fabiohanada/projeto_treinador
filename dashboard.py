@@ -6,7 +6,7 @@ import hashlib, urllib.parse
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v1 (LAYOUT ESTÁVEL - NÃO MODIFICAR)
+# VERSÃO: v1 (LAYOUT ESTÁVEL - ADICIONADO BOTÃO TESTE TWILIO)
 # ==========================================
 
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
@@ -51,8 +51,16 @@ if not st.session_state.logado:
 user = st.session_state.user_info
 eh_admin = user.get('is_admin', False)
 
+# --- SIDEBAR (Barra Lateral) ---
 with st.sidebar:
     st.markdown(f"### 👤 {user['nome']}")
+    st.divider()
+    
+    # BOTÃO DE TESTE TWILIO (Acima do Sair)
+    if st.button("🧪 Testar Twilio (WhatsApp)", use_container_width=True, type="secondary"):
+        st.toast("🔗 Iniciando ponte com Twilio... Em breve integrado ao Strava!")
+        st.info("Função de disparo via WhatsApp em desenvolvimento.")
+    
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.logado = False
         st.rerun()
@@ -125,5 +133,3 @@ else:
         fig_fc = px.line(df, x='Data', y='FC_Final', markers=True)
         fig_fc.add_hline(y=130, line_dash="dash")
         st.plotly_chart(fig_fc, use_container_width=True)
-
-    st.info("💡 Treinos sem registro de FC usam a base de 130 bpm para o cálculo de carga.")
