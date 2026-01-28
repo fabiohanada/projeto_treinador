@@ -5,14 +5,14 @@ from datetime import datetime
 import os, requests, hashlib
 from supabase import create_client
 
-# 1. CONFIGURAÇÕES (Identicas a 27/01)
+# 1. CONFIGURAÇÕES (Mantendo o visual do dia 27/01)
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
 # --- CHAVES PIX (EDITE AQUI) ---
 chave_pix_visivel = "seu-email@pix.com"
-pix_copia_e_cola = "00020126330014BR.GOV.BCB.PIX0111suachavepix" # Cole aqui o código "Copia e Cola" do seu banco
+pix_copia_e_cola = "00020126330014BR.GOV.BCB.PIX0111suachavepix" 
 
-# CSS para restaurar o visual exato e estilizar o PIX
+# CSS para manter o layout idêntico e estilizar os alertas
 st.markdown("""
     <style>
     span.no-style { text-decoration: none !important; color: inherit !important; border-bottom: none !important; }
@@ -28,6 +28,15 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         margin-bottom: 20px;
     }
+    .status-pago {
+        background-color: #00bfa5;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 5px;
+        font-size: 0.8em;
+        font-weight: bold;
+        margin-left: 10px;
+    }
     .pix-chave {
         background-color: #f0f2f6;
         padding: 12px;
@@ -38,11 +47,6 @@ st.markdown("""
         display: block;
         margin: 15px 0;
         word-break: break-all;
-    }
-    .qr-code-img {
-        border: 10px solid white;
-        border-radius: 10px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
     }
     </style>
     """, unsafe_allow_html=True)
@@ -60,7 +64,7 @@ def formatar_data_br(data_str):
     except: return data_str
 
 # =================================================================
-# 🔑 LOGIN E CADASTRO (Layout 27/01)
+# 🔑 LOGIN E CADASTRO
 # =================================================================
 if "logado" not in st.session_state: st.session_state.logado = False
 
@@ -91,7 +95,6 @@ if not st.session_state.logado:
                     if concordo and n_c and e_c and s_c:
                         supabase.table("usuarios_app").insert({"nome": n_c, "email": e_c, "senha": hash_senha(s_c), "is_admin": False, "status_pagamento": False, "data_vencimento": str(datetime.now().date())}).execute()
                         st.success("Conta criada! Mude para a aba Entrar.")
-                    else: st.warning("Preencha tudo e aceite a LGPD.")
     st.stop()
 
 # =================================================================
@@ -108,7 +111,7 @@ with st.sidebar:
         st.session_state.logado = False
         st.rerun()
 
-# 👨‍🏫 PAINEL ADMIN (RESTAURADO DIA 27/01)
+# 👨‍🏫 PAINEL ADMIN (Com Alerta de Pagamento)
 if eh_admin:
     st.title("👨‍🏫 Painel Administrativo")
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
@@ -118,7 +121,9 @@ if eh_admin:
             with st.container(border=True):
                 c_info, c_btns = st.columns([3, 1])
                 with c_info:
-                    st.markdown(f"**Aluno:** {aluno['nome']}")
+                    # ALERTA DE PAGAMENTO AQUI: Se status for true, aparece o selo PAGO
+                    pago_badge = "<span class='status-pago'>PAGO</span>" if aluno['status_pagamento'] else ""
+                    st.markdown(f"**Aluno:** {aluno['nome']} {pago_badge}", unsafe_allow_html=True)
                     st.markdown(f"**E-mail:** <span class='no-style'>{aluno['email']}</span>", unsafe_allow_html=True)
                     st.write(f"**Vencimento Atual:** {formatar_data_br(aluno['data_vencimento'])}")
                     
@@ -137,7 +142,7 @@ if eh_admin:
                         supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                         st.rerun()
 
-# 🚀 DASHBOARD CLIENTE (Com QR Code Dinâmico)
+# 🚀 DASHBOARD CLIENTE (Mensagem de Comprovante Removida)
 else:
     st.title("🚀 Meus Treinos")
     v_str = user.get('data_vencimento', "2000-01-01")
@@ -152,18 +157,16 @@ else:
         
         st.markdown("---")
         
-        # Gerador Automático de QR Code baseado no seu PIX Copia e Cola
         qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=150x150&data={pix_copia_e_cola}"
         
         st.markdown(f"""
             <div class="pix-card">
                 <h3 style="margin-top:0; color:#333;">💳 Renovação via PIX</h3>
                 <p>Escaneie o QR Code abaixo para pagar:</p>
-                <img src="{qr_url}" class="qr-code-img" alt="QR Code PIX">
+                <img src="{qr_url}" style="border: 10px solid white; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
                 <p style="margin-top:15px; font-size: 0.9em;"><b>Chave PIX:</b></p>
                 <span class="pix-chave">{chave_pix_visivel}</span>
                 <p style="font-size: 0.9em; color: #555;"><b>Valor: R$ 00,00</b></p>
-                <small style="color:#777;">Após pagar, envie o comprovante ao Fábio no WhatsApp.</small>
             </div>
         """, unsafe_allow_html=True)
         
@@ -171,12 +174,4 @@ else:
             st.error("⚠️ Seu acesso está suspenso. Realize o pagamento acima para liberar seus treinos.")
             st.stop()
 
-    # Conteúdo Liberado
     st.success(f"Olá {user['nome']}, seus treinos estão liberados!")
-    
-    # Espaço para os gráficos do Plotly
-    st.subheader("📊 Seu Desempenho")
-    st.info("Conecte ao Strava para carregar seus dados.")
-    
-    auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=read,activity:read&state={user['email']}"
-    st.link_button("🔗 Sincronizar Strava", auth_url)
