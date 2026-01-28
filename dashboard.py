@@ -9,15 +9,11 @@ from dotenv import load_dotenv
 load_dotenv()
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
-# CSS para remover sublinhado, ajustar cores e espaçamentos
+# CSS para limpeza visual e alinhamento
 st.markdown("""
     <style>
-    /* Remove sublinhado de links e e-mails */
     span.no-style { text-decoration: none !important; color: inherit !important; }
-    a { text-decoration: none !important; }
-    
-    /* Ajuste de espaçamento das linhas no card */
-    .aluno-row { margin-bottom: 8px; line-height: 1.6; }
+    .stButton>button { border-radius: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -38,7 +34,7 @@ def formatar_data_br(data_str):
     except: return data_str
 
 # =================================================================
-# 🔑 LOGIN
+# 🔑 GESTÃO DE SESSÃO E LOGIN
 # =================================================================
 if "logado" not in st.session_state: st.session_state.logado = False
 
@@ -58,14 +54,21 @@ if not st.session_state.logado:
     st.stop()
 
 # =================================================================
-# 🏠 ÁREA LOGADA
+# 🏠 ÁREA LOGADA (Aparece para Admin e Cliente)
 # =================================================================
 user = st.session_state.user_info
 eh_admin = user.get('is_admin', False)
 
+# --- BARRA LATERAL FIXA ---
 with st.sidebar:
-    if st.button("🚪 Sair", use_container_width=True):
+    st.markdown(f"### 👤 {user['nome']}")
+    st.write(f"📧 {user['email']}")
+    if eh_admin:
+        st.info("Painel: Treinador")
+    st.divider()
+    if st.button("🚪 Sair do Sistema", use_container_width=True):
         st.session_state.logado = False
+        st.session_state.user_info = None
         st.rerun()
 
 # 👨‍🏫 TELA DO ADMIN (FÁBIO)
@@ -76,48 +79,64 @@ if eh_admin:
     if res_alunos.data:
         for aluno in res_alunos.data:
             with st.container(border=True):
-                # Dividimos o card em Informações (esquerda) e Botões (direita)
                 col_info, col_botoes = st.columns([3, 1])
-                
                 with col_info:
                     st.markdown(f"**Aluno:** {aluno['nome']}")
-                    
-                    # E-mail usando span para forçar a remoção do sublinhado
                     st.markdown(f"**E-mail:** <span class='no-style'>{aluno['email']}</span>", unsafe_allow_html=True)
                     
-                    status_cor = "green" if aluno['status_pagamento'] else "red"
-                    status_texto = "Ativo" if aluno['status_pagamento'] else "Bloqueado"
-                    st.markdown(f"**Status:** <span style='color:{status_cor}; font-weight:bold;'>{status_texto}</span>", unsafe_allow_html=True)
+                    status_cor = "#28a745" if aluno['status_pagamento'] else "#dc3545"
+                    status_txt = "ATIVO" if aluno['status_pagamento'] else "BLOQUEADO"
+                    st.markdown(f"**Status:** <span style='color:{status_cor}; font-weight:bold;'>{status_txt}</span>", unsafe_allow_html=True)
+                    st.markdown(f"**Vencimento Atual:** {formatar_data_br(aluno['data_vencimento'])}")
                     
-                    st.write(f"**Vencimento Atual:** {formatar_data_br(aluno['data_vencimento'])}")
-                    
-                    # Linha: Alterar Vencimento + Seletor de Data
+                    # Linha de Alteração Alinhada
                     c_label, c_input = st.columns([0.8, 1])
-                    c_label.markdown("**Alterar Vencimento:**")
+                    c_label.markdown("<br>**Alterar Vencimento:**", unsafe_allow_html=True)
                     nova_data = c_input.date_input(
-                        "Selecione a data", 
+                        "Nova Data", 
                         value=datetime.strptime(aluno['data_vencimento'], '%Y-%m-%d'),
-                        key=f"date_{aluno['id']}",
+                        key=f"d_{aluno['id']}",
                         format="DD/MM/YYYY",
-                        label_visibility="collapsed" # Esconde o rótulo do seletor para alinhar
+                        label_visibility="collapsed"
                     )
                 
                 with col_botoes:
-                    st.write("") # Espaçador para alinhar botões
-                    if st.button("💾 Salvar Data", key=f"save_{aluno['id']}", use_container_width=True):
+                    st.write("") 
+                    if st.button("💾 Salvar Data", key=f"s_{aluno['id']}", use_container_width=True):
                         supabase.table("usuarios_app").update({"data_vencimento": str(nova_data)}).eq("id", aluno['id']).execute()
-                        st.success("Atualizado!")
+                        st.success("Salvo!")
                         st.rerun()
                     
-                    tipo_btn = "primary" if not aluno['status_pagamento'] else "secondary"
-                    txt_btn = "🔓 Liberar Acesso" if not aluno['status_pagamento'] else "🔒 Bloquear Acesso"
-                    if st.button(txt_btn, key=f"acc_{aluno['id']}", use_container_width=True, type=tipo_btn):
+                    txt_acc = "🔓 Liberar" if not aluno['status_pagamento'] else "🔒 Bloquear"
+                    if st.button(txt_acc, key=f"a_{aluno['id']}", use_container_width=True):
                         supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                         st.rerun()
-    else:
-        st.info("Nenhum aluno encontrado.")
 
-# 🚀 TELA DO CLIENTE (Simplificada)
+# 🚀 TELA DO CLIENTE
 else:
-    st.title(f"🚀 Dashboard: {user['nome']}")
-    # ... (Restante do código do cliente mantido conforme anterior)
+    st.title(f"🚀 Dashboard do Atleta")
+    v_str = user.get('data_vencimento', "2000-01-01")
+    venc_date = datetime.strptime(v_str, '%Y-%m-%d').date()
+    pago = user.get('status_pagamento', False) and datetime.now().date() <= venc_date
+
+    # Financeiro do Cliente
+    with st.expander("💳 Minha Assinatura", expanded=not pago):
+        st.write(f"**Vencimento:** {formatar_data_br(v_str)}")
+        if not pago: 
+            st.error("Acesso suspenso. Fale com o Fábio para renovação.")
+            st.stop()
+
+    # Se estiver pago, mostra os treinos
+    res_s = supabase.table("usuarios").select("*").eq("email", user['email']).execute()
+    if res_s.data:
+        atleta = res_s.data[0]
+        if st.button("🔄 Sincronizar Strava", type="primary"):
+            # Função de sincronização aqui...
+            st.rerun()
+        
+        # Tabela de resultados aqui...
+        st.info("Treinos sincronizados aparecerão aqui.")
+    else:
+        st.warning("Vincule seu Strava.")
+        auth_url = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=read,activity:read&state={user['email']}"
+        st.link_button("🔗 Conectar Strava", auth_url)
