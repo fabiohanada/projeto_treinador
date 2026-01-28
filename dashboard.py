@@ -5,7 +5,10 @@ from datetime import datetime
 import hashlib, urllib.parse
 from supabase import create_client
 
-# 1. CONFIGURAÇÕES
+# ==========================================
+# VERSÃO: v1 (LAYOUT ESTÁVEL - NÃO MODIFICAR)
+# ==========================================
+
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONFIGURAÇÃO PIX ---
@@ -60,9 +63,12 @@ if eh_admin:
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     if alunos.data:
         for aluno in alunos.data:
+            is_maria = "Maria" in aluno['nome']
             with st.container(border=True):
                 c_info, c_btns = st.columns([3, 1])
                 with c_info:
+                    if is_maria and not aluno['status_pagamento']:
+                        st.warning(f"🔔 NOTIFICAÇÃO: Pagamento de Teste identificado para {aluno['nome']}!")
                     pago_tag = "✅" if aluno['status_pagamento'] else "❌"
                     st.markdown(f"**Aluno:** {aluno['nome']} {pago_tag}")
                     st.write(f"**Vencimento:** {formatar_data_br(aluno['data_vencimento'])}")
@@ -72,11 +78,9 @@ if eh_admin:
                         supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                         st.rerun()
 
-# 🚀 DASHBOARD CLIENTE (RESTAURADO COM TUDO)
+# 🚀 DASHBOARD CLIENTE (v1)
 else:
     st.title(f"🚀 Painel de Treino")
-    
-    # 1. BLOCO DE INFORMAÇÕES DE ASSINATURA (Restaurado)
     v_str = user.get('data_vencimento', "2000-01-01")
     pago = user.get('status_pagamento', False)
     
@@ -89,25 +93,16 @@ else:
 
     st.divider()
 
-    # 2. BLOCO DE PAGAMENTO (Só aparece se estiver pendente)
     if not pago:
         with st.expander("💳 Clique aqui para ver o QR Code de Pagamento", expanded=True):
             payload_encoded = urllib.parse.quote(pix_copia_e_cola)
             qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={payload_encoded}"
-            st.markdown(f"""
-                <div style="text-align:center; border:2px solid #ff4b4b; padding:20px; border-radius:15px;">
-                    <h3>Renovação via PIX (R$ 9,99)</h3>
-                    <img src="{qr_url}" width="200"><br><br>
-                    <code style="padding:10px; background:#f0f2f6; border-radius:5px;">{chave_pix_visivel}</code>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<div style="text-align:center; border:2px solid #ff4b4b; padding:20px; border-radius:15px;"><h3>Renovação via PIX (R$ 9,99)</h3><img src="{qr_url}" width="200"><br><br><code>{chave_pix_visivel}</code></div>', unsafe_allow_html=True)
         st.warning("⚠️ Seu acesso completo será liberado após a confirmação do pagamento.")
         st.stop()
 
-    # 3. CONTEÚDO DOS TREINOS (Tabela + Gráficos)
     st.success(f"Olá {user['nome']}, seus treinos estão liberados!")
 
-    # Dados simulados com a regra de 130 BPM
     df = pd.DataFrame([
         {"Data": "24/01", "Treino": "Rodagem", "Km": 10, "Tempo": 60, "FC": 145},
         {"Data": "25/01", "Treino": "Intervalado", "Km": 8, "Tempo": 45, "FC": 160},
@@ -117,11 +112,9 @@ else:
     df['FC_Final'] = df['FC'].apply(lambda x: 130 if x <= 0 else x)
     df['TRIMP'] = df['Tempo'] * (df['FC_Final'] / 100)
 
-    # Exibição da Planilha
     st.subheader("📋 Planilha de Treinos")
     st.dataframe(df[['Data', 'Treino', 'Km', 'Tempo', 'FC_Final']], use_container_width=True, hide_index=True)
 
-    # Exibição dos Gráficos (Um ao lado do outro)
     st.subheader("📊 Análise de Desempenho")
     c_g1, c_g2 = st.columns(2)
     with c_g1:
