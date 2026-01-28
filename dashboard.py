@@ -7,7 +7,7 @@ from supabase import create_client
 from twilio.rest import Client 
 
 # ==========================================
-# VERSÃO: v1 (LAYOUT INTEGRAL RESTAURADO)
+# VERSÃO: v1 (LAYOUT INTEGRAL - ADMIN S/ BOTÃO SYNC)
 # ==========================================
 
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
@@ -81,9 +81,15 @@ eh_admin = user.get('is_admin', False)
 
 with st.sidebar:
     st.markdown(f"### 👤 {user['nome']}")
-    if st.button("🧪 Sincronizar e Notificar", use_container_width=True):
-        sucesso = enviar_whatsapp_real(user['nome'], user.get('telefone',''), "Treino v1", "10", "60")
-        if sucesso: st.toast("✅ WhatsApp enviado!")
+    
+    # BOTÃO SÓ APARECE PARA O CLIENTE (Não Admin)
+    if not eh_admin:
+        if st.button("🧪 Sincronizar e Notificar", use_container_width=True):
+            # Dados exemplo para teste
+            sucesso = enviar_whatsapp_real(user['nome'], user.get('telefone',''), "Treino v1", "10", "60")
+            if sucesso: st.toast("✅ WhatsApp enviado!")
+    
+    st.divider()
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.logado = False
         st.query_params.clear()
@@ -100,7 +106,6 @@ if eh_admin:
                 pago_status = "✅ PAGO" if aluno['status_pagamento'] else "❌ PENDENTE"
                 st.markdown(f"**Aluno:** {aluno['nome']} | **Status:** {pago_status}")
                 st.write(f"Vencimento Atual: {formatar_data_br(aluno['data_vencimento'])}")
-                # Campo de data restaurado
                 nova_data = st.date_input("Alterar Vencimento", value=datetime.strptime(aluno['data_vencimento'], '%Y-%m-%d'), key=f"d_{aluno['id']}")
             with c_btns:
                 if st.button("💾 Salvar Data", key=f"s_{aluno['id']}", use_container_width=True):
