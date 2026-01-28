@@ -9,7 +9,7 @@ from supabase import create_client
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
 # --- CHAVES PIX (EDITE AQUI) ---
-chave_pix_visivel = "seu-email@pix.com"
+chave_pix_visivel = "fabioh1979@hotmail.com"
 pix_copia_e_cola = "00020126330014BR.GOV.BCB.PIX0111suachavepix" 
 
 # CSS para manter o layout idêntico e estilizar os alertas
