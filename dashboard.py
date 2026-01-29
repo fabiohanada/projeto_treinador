@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v3.0 (CADASTRO RESTAURADO + ADMIN TRANCADO)
+# VERSÃO: v3.1 (LGPD NO CADASTRO + ADMIN PRESERVADO)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v3.0", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v3.1", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES SEGURAS ---
 try:
@@ -65,7 +65,7 @@ if "user_mail" in st.query_params and not st.session_state.logado:
     if u.data:
         st.session_state.logado, st.session_state.user_info = True, u.data[0]
 
-# --- TELA INICIAL (LOGIN + CADASTRO) ---
+# --- TELA INICIAL (LOGIN + CADASTRO COM LGPD) ---
 if not st.session_state.logado:
     st.markdown("<h2 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h2>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
@@ -88,15 +88,22 @@ if not st.session_state.logado:
             with st.form("cadastro_form"):
                 nome_c = st.text_input("Nome Completo")
                 email_c = st.text_input("E-mail")
-                zap_c = st.text_input("WhatsApp (+55...)")
                 senha_c = st.text_input("Crie uma Senha", type="password")
+                
+                # --- CAIXA LGPD ---
+                st.markdown("---")
+                lgpd = st.checkbox("Li e aceito os Termos de Uso e a Política de Privacidade (LGPD). Autorizo o uso dos meus dados de treino para análise de performance.")
+                with st.expander("Ver Termos de Uso"):
+                    st.write("Seus dados de treino coletados via Strava são utilizados exclusivamente pela Fábio Assessoria para prescrição e análise de carga de treinamento (TRIMP). Não compartilhamos seus dados com terceiros.")
+                
                 if st.form_submit_button("Cadastrar", use_container_width=True):
-                    if nome_c and email_c and senha_c:
+                    if not lgpd:
+                        st.error("Você precisa aceitar os termos da LGPD para continuar.")
+                    elif nome_c and email_c and senha_c:
                         try:
                             supabase.table("usuarios_app").insert({
                                 "nome": nome_c, 
                                 "email": email_c, 
-                                "telefone": zap_c, 
                                 "senha": hash_senha(senha_c), 
                                 "status_pagamento": False, 
                                 "data_vencimento": str(date.today())
@@ -130,7 +137,7 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# 👨‍🏫 PAINEL ADMIN (ESTRUTURA TRANCADA)
+# 👨‍🏫 PAINEL ADMIN (MANTIDO CONFORME SUA SOLICITAÇÃO)
 # ==========================================
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
