@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v2.9 (RESTAURAÇÃO TOTAL DO ADMIN)
+# VERSÃO: v3.0 (CADASTRO RESTAURADO + ADMIN TRANCADO)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v2.9", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v3.0", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES SEGURAS ---
 try:
@@ -56,7 +56,7 @@ def sincronizar_strava(auth_code, aluno_id):
     except: return False
     return False
 
-# --- LOGICA DE LOGIN ---
+# --- LOGICA DE LOGIN E ACESSO ---
 if "logado" not in st.session_state: st.session_state.logado = False
 if "code" in st.query_params: st.session_state.strava_code = st.query_params["code"]
 
@@ -65,20 +65,47 @@ if "user_mail" in st.query_params and not st.session_state.logado:
     if u.data:
         st.session_state.logado, st.session_state.user_info = True, u.data[0]
 
+# --- TELA INICIAL (LOGIN + CADASTRO) ---
 if not st.session_state.logado:
     st.markdown("<h2 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h2>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
     with c2:
-        with st.form("login_v3"):
-            e = st.text_input("E-mail")
-            s = st.text_input("Senha", type="password")
-            if st.form_submit_button("Acessar Painel", use_container_width=True):
-                u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
-                if u.data:
-                    st.session_state.logado, st.session_state.user_info = True, u.data[0]
-                    st.query_params["user_mail"] = e
-                    st.rerun()
-                else: st.error("Dados incorretos.")
+        tab_login, tab_cadastro = st.tabs(["🔑 Entrar", "📝 Novo Aluno"])
+        
+        with tab_login:
+            with st.form("login_form"):
+                e = st.text_input("E-mail")
+                s = st.text_input("Senha", type="password")
+                if st.form_submit_button("Acessar Painel", use_container_width=True):
+                    u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
+                    if u.data:
+                        st.session_state.logado, st.session_state.user_info = True, u.data[0]
+                        st.query_params["user_mail"] = e
+                        st.rerun()
+                    else: st.error("Dados incorretos.")
+        
+        with tab_cadastro:
+            with st.form("cadastro_form"):
+                nome_c = st.text_input("Nome Completo")
+                email_c = st.text_input("E-mail")
+                zap_c = st.text_input("WhatsApp (+55...)")
+                senha_c = st.text_input("Crie uma Senha", type="password")
+                if st.form_submit_button("Cadastrar", use_container_width=True):
+                    if nome_c and email_c and senha_c:
+                        try:
+                            supabase.table("usuarios_app").insert({
+                                "nome": nome_c, 
+                                "email": email_c, 
+                                "telefone": zap_c, 
+                                "senha": hash_senha(senha_c), 
+                                "status_pagamento": False, 
+                                "data_vencimento": str(date.today())
+                            }).execute()
+                            st.success("Cadastro realizado! Mude para a aba 'Entrar' e faça seu login.")
+                        except:
+                            st.error("E-mail já cadastrado ou erro no servidor.")
+                    else:
+                        st.warning("Preencha todos os campos obrigatórios.")
     st.stop()
 
 user = st.session_state.user_info
@@ -103,43 +130,31 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# 👨‍🏫 PAINEL ADMIN (RESTAURADO)
+# 👨‍🏫 PAINEL ADMIN (ESTRUTURA TRANCADA)
 # ==========================================
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
     st.subheader("Gestão de Alunos")
-    
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
-    
     for aluno in alunos.data:
         with st.container(border=True):
             col1, col2, col3 = st.columns([2, 2, 1.5])
-            
             with col1:
                 st.markdown(f"#### {aluno['nome']}")
                 st.caption(f"📧 {aluno['email']}")
                 status_atual = "✅ Ativo" if aluno['status_pagamento'] else "❌ Bloqueado"
                 st.markdown(f"**Status:** {status_atual}")
-            
             with col2:
-                # Tratamento de data para o seletor
                 dt_banco = aluno.get('data_vencimento')
-                try: 
-                    val_data = datetime.strptime(str(dt_banco), '%Y-%m-%d').date() if dt_banco and str(dt_banco) != "None" else date.today()
-                except: 
-                    val_data = date.today()
-                
+                try: val_data = datetime.strptime(str(dt_banco), '%Y-%m-%d').date() if dt_banco and str(dt_banco) != "None" else date.today()
+                except: val_data = date.today()
                 nova_dt = st.date_input("Vencimento", value=val_data, key=f"dt_{aluno['id']}")
                 st.write(f"Vence em: {formatar_data_br(dt_banco)}")
-            
             with col3:
-                st.write("") # Espaçador
-                # Botão SALVAR DATA
+                st.write("") 
                 if st.button("💾 Salvar Data", key=f"sv_{aluno['id']}", use_container_width=True):
                     supabase.table("usuarios_app").update({"data_vencimento": str(nova_dt)}).eq("id", aluno['id']).execute()
                     st.success("Data Atualizada!")
-                
-                # Botão LIBERAR/BLOQUEAR
                 label_btn = "🔒 Bloquear" if aluno['status_pagamento'] else "🔓 Liberar Acesso"
                 if st.button(label_btn, key=f"ac_{aluno['id']}", use_container_width=True):
                     supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
