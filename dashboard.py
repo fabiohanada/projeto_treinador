@@ -1,15 +1,15 @@
 import streamlit as st
-import pandas as pd
+import pd as pd
 import plotly.express as px
 from datetime import datetime, date
 import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v3.6 (GATILHO DE NOTIFICAÇÃO ADMIN)
+# VERSÃO: v3.8 (ALERTA COM NOME COMPLETO)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v3.6", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v3.8", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES SEGURAS ---
 try:
@@ -33,19 +33,15 @@ def formatar_data_br(data_str):
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
 
-# NOVA FUNÇÃO: NOTIFICAR ADMIN
-def notificar_pagamento_admin(aluno_nome, aluno_email):
+# FUNÇÃO DE NOTIFICAÇÃO ATUALIZADA COM NOME COMPLETO
+def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
     try:
-        dados_notificacao = {
-            "mensagem": f"O aluno {aluno_nome} acessou a área de pagamento.",
+        supabase.table("alertas_admin").insert({
+            "mensagem": f"O ALUNO: {aluno_nome_completo.upper()} acessou a área de pagamento PIX.",
             "lida": False,
-            "created_at": datetime.now().isoformat(),
             "email_aluno": aluno_email
-        }
-        # Insere na tabela de alertas (certifique-se que ela existe no Supabase)
-        supabase.table("alertas_admin").insert(dados_notificacao).execute()
-    except:
-        pass # Silencioso para não travar o app do aluno
+        }).execute()
+    except: pass 
 
 def sincronizar_strava(auth_code, aluno_id):
     token_url = "https://www.strava.com/oauth/token"
@@ -120,16 +116,18 @@ with st.sidebar:
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.clear(); st.query_params.clear(); st.rerun()
 
-# --- PAINEL ADMIN (TRANCADO) ---
+# --- PAINEL ADMIN (ESTRUTURA TRANCADA) ---
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
-    # Pequena adição: Contador de alertas
-    alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
-    if alertas.data:
-        st.warning(f"🔔 Você tem {len(alertas.data)} novos avisos de pagamento!")
-        if st.button("Limpar Alertas"):
-            supabase.table("alertas_admin").update({"lida": True}).eq("lida", False).execute()
-            st.rerun()
+    
+    try:
+        alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
+        if alertas.data:
+            st.warning(f"🔔 Você tem {len(alertas.data)} novos avisos de acesso ao PIX!")
+            if st.button("Limpar Alertas"):
+                supabase.table("alertas_admin").update({"lida": True}).eq("lida", False).execute()
+                st.rerun()
+    except: pass 
 
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     for aluno in alunos.data:
@@ -158,9 +156,8 @@ else:
     pago = user.get('status_pagamento', False)
     
     if not pago:
-        # GATILHO DE NOTIFICAÇÃO (Fica aqui para avisar o Admin assim que o aluno vê o PIX)
+        # Envia o nome completo contido na variável user['nome']
         notificar_pagamento_admin(user['nome'], user['email'])
-        
         st.error("⚠️ Seu acesso está pendente de renovação ou pagamento.")
         with st.expander("💳 Dados para Pagamento PIX", expanded=True):
             st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(pix_copia_e_cola)}")
