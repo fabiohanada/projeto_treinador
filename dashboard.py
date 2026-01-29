@@ -12,7 +12,7 @@ st.set_page_config(page_title="Fábio Assessoria v2.6", layout="wide", page_icon
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 CLIENT_ID = st.secrets["STRAVA_CLIENT_ID"]
 CLIENT_SECRET = st.secrets["STRAVA_CLIENT_SECRET"]
-REDIRECT_URI = "https://projeto-treinador.streamlit.app/"
+REDIRECT_URI = "https://seu-treino-app.streamlit.app/"
 
 # --- FUNÇÕES ---
 def hash_senha(senha): return hashlib.sha256(str.encode(senha)).hexdigest()
