@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v4.1 (ALERTA ÚNICO POR CLIENTE)
+# VERSÃO: v4.2 (ALERTA DE PIX REALIZADO)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v4.1", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v4.2", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES SEGURAS ---
 try:
@@ -33,16 +33,15 @@ def formatar_data_br(data_str):
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
 
-# FUNÇÃO DE ALERTA: USA UPSERT PARA MOSTRAR APENAS 1 ALERTA POR ALUNO
+# FUNÇÃO DE ALERTA: AFIRMA QUE O PIX FOI FEITO
 def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
     try:
         dados = {
-            "email_aluno": aluno_email, # Chave única para o upsert
-            "mensagem": f"PAGAMENTO PENDENTE: {aluno_nome_completo.upper()}",
+            "email_aluno": aluno_email,
+            "mensagem": f"✅ PIX REALIZADO: {aluno_nome_completo.upper()}",
             "lida": False,
             "updated_at": datetime.now().isoformat()
         }
-        # Upsert garante que só exista um registro não lido por e-mail de aluno
         supabase.table("alertas_admin").upsert(dados, on_conflict="email_aluno").execute()
     except: pass 
 
@@ -123,12 +122,11 @@ with st.sidebar:
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
     try:
-        # Busca apenas alertas não lidos
         alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
         if alertas.data:
             for a in alertas.data:
-                st.warning(f"🔔 {a['mensagem']}")
-            if st.button("Limpar Notificações de Pagamento"):
+                st.success(f"💰 {a['mensagem']}")
+            if st.button("Confirmar Leitura dos Pagamentos"):
                 supabase.table("alertas_admin").update({"lida": True}).eq("lida", False).execute()
                 st.rerun()
     except: pass 
