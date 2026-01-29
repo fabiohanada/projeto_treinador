@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v3.1 (LGPD NO CADASTRO + ADMIN PRESERVADO)
+# VERSÃO: v3.3 (REDIRECT URI ATUALIZADA)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v3.1", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v3.3", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES SEGURAS ---
 try:
@@ -20,7 +20,11 @@ except Exception as e:
     st.error("Erro nas Secrets: Verifique as chaves no Streamlit Cloud.")
     st.stop()
 
-REDIRECT_URI = "https://projeto-treinador.streamlit.app/" 
+# --- ATUALIZAÇÃO DA URI DE REDIRECIONAMENTO ---
+REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
+
+chave_pix_visivel = "fabioh1979@hotmail.com"
+pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
 
 # --- FUNÇÕES ---
 def hash_senha(senha): 
@@ -33,7 +37,12 @@ def formatar_data_br(data_str):
 
 def sincronizar_strava(auth_code, aluno_id):
     token_url = "https://www.strava.com/oauth/token"
-    payload = {'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET, 'code': auth_code, 'grant_type': 'authorization_code'}
+    payload = {
+        'client_id': CLIENT_ID, 
+        'client_secret': CLIENT_SECRET, 
+        'code': auth_code, 
+        'grant_type': 'authorization_code'
+    }
     try:
         r = requests.post(token_url, data=payload).json()
         if 'access_token' in r:
@@ -65,13 +74,12 @@ if "user_mail" in st.query_params and not st.session_state.logado:
     if u.data:
         st.session_state.logado, st.session_state.user_info = True, u.data[0]
 
-# --- TELA INICIAL (LOGIN + CADASTRO COM LGPD) ---
+# --- TELA INICIAL (LOGIN + CADASTRO) ---
 if not st.session_state.logado:
     st.markdown("<h2 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h2>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
     with c2:
         tab_login, tab_cadastro = st.tabs(["🔑 Entrar", "📝 Novo Aluno"])
-        
         with tab_login:
             with st.form("login_form"):
                 e = st.text_input("E-mail")
@@ -83,36 +91,20 @@ if not st.session_state.logado:
                         st.query_params["user_mail"] = e
                         st.rerun()
                     else: st.error("Dados incorretos.")
-        
         with tab_cadastro:
             with st.form("cadastro_form"):
                 nome_c = st.text_input("Nome Completo")
                 email_c = st.text_input("E-mail")
                 senha_c = st.text_input("Crie uma Senha", type="password")
-                
-                # --- CAIXA LGPD ---
                 st.markdown("---")
-                lgpd = st.checkbox("Li e aceito os Termos de Uso e a Política de Privacidade (LGPD). Autorizo o uso dos meus dados de treino para análise de performance.")
-                with st.expander("Ver Termos de Uso"):
-                    st.write("Seus dados de treino coletados via Strava são utilizados exclusivamente pela Fábio Assessoria para prescrição e análise de carga de treinamento (TRIMP). Não compartilhamos seus dados com terceiros.")
-                
+                lgpd = st.checkbox("Li e aceito os Termos de Uso e LGPD.")
                 if st.form_submit_button("Cadastrar", use_container_width=True):
-                    if not lgpd:
-                        st.error("Você precisa aceitar os termos da LGPD para continuar.")
-                    elif nome_c and email_c and senha_c:
+                    if lgpd and nome_c and email_c and senha_c:
                         try:
-                            supabase.table("usuarios_app").insert({
-                                "nome": nome_c, 
-                                "email": email_c, 
-                                "senha": hash_senha(senha_c), 
-                                "status_pagamento": False, 
-                                "data_vencimento": str(date.today())
-                            }).execute()
-                            st.success("Cadastro realizado! Mude para a aba 'Entrar' e faça seu login.")
-                        except:
-                            st.error("E-mail já cadastrado ou erro no servidor.")
-                    else:
-                        st.warning("Preencha todos os campos obrigatórios.")
+                            supabase.table("usuarios_app").insert({"nome": nome_c, "email": email_c, "senha": hash_senha(senha_c), "status_pagamento": False, "data_vencimento": str(date.today())}).execute()
+                            st.success("Cadastrado! Faça login na aba ao lado.")
+                        except: st.error("Erro no cadastro.")
+                    else: st.warning("Preencha tudo e aceite os termos.")
     st.stop()
 
 user = st.session_state.user_info
@@ -136,9 +128,7 @@ with st.sidebar:
         st.query_params.clear()
         st.rerun()
 
-# ==========================================
-# 👨‍🏫 PAINEL ADMIN (MANTIDO CONFORME SUA SOLICITAÇÃO)
-# ==========================================
+# --- PAINEL ADMIN (TRANCADO) ---
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
     st.subheader("Gestão de Alunos")
@@ -167,11 +157,18 @@ if eh_admin:
                     supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                     st.rerun()
 
-# ==========================================
-# 🚀 PAINEL ALUNO
-# ==========================================
+# --- PAINEL ALUNO ---
 else:
     st.title(f"🚀 Dashboard: {user['nome']}")
+    pago = user.get('status_pagamento', False)
+    if not pago:
+        st.error("⚠️ Seu acesso está pendente de renovação.")
+        with st.expander("💳 Dados para Pagamento PIX", expanded=True):
+            st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(pix_copia_e_cola)}")
+            st.code(chave_pix_visivel, language="text")
+        st.stop()
+
+    st.info(f"📅 Seu plano vence em: **{formatar_data_br(user.get('data_vencimento'))}**")
     res = supabase.table("treinos_alunos").select("*").eq("aluno_id", user['id']).order("data", desc=True).execute()
     df = pd.DataFrame(res.data)
 
