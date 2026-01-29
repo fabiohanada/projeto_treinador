@@ -1,15 +1,15 @@
 import streamlit as st
-import pandas as pd  # <--- Corrigido aqui (estava apenas 'pd')
+import pandas as pd
 import plotly.express as px
 from datetime import datetime, date
 import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v3.9 (CORREÇÃO DE IMPORT + NOME COMPLETO)
+# VERSÃO: v4.0 (ALERTA DETALHADO COM NOME COMPLETO)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v3.9", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v4.0", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES SEGURAS ---
 try:
@@ -33,10 +33,11 @@ def formatar_data_br(data_str):
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
 
+# FUNÇÃO DE ALERTA: ESPECIFICA O NOME COMPLETO DO ALUNO
 def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
     try:
         supabase.table("alertas_admin").insert({
-            "mensagem": f"O ALUNO: {aluno_nome_completo.upper()} acessou a área de pagamento PIX.",
+            "mensagem": f"ALERTA DE PAGAMENTO: O aluno {aluno_nome_completo.upper()} abriu a tela do PIX.",
             "lida": False,
             "email_aluno": aluno_email
         }).execute()
@@ -115,14 +116,16 @@ with st.sidebar:
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.clear(); st.query_params.clear(); st.rerun()
 
-# --- PAINEL ADMIN (TRANCADO) ---
+# --- PAINEL ADMIN ---
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
     try:
         alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
         if alertas.data:
-            st.warning(f"🔔 Você tem {len(alertas.data)} novos avisos de acesso ao PIX!")
-            if st.button("Limpar Alertas"):
+            # O Alerta aqui já mostrará a mensagem com o Nome Completo
+            for a in alertas.data:
+                st.warning(f"🔔 {a['mensagem']}")
+            if st.button("Limpar Todos os Alertas"):
                 supabase.table("alertas_admin").update({"lida": True}).eq("lida", False).execute()
                 st.rerun()
     except: pass 
@@ -153,7 +156,9 @@ else:
     st.title(f"🚀 Dashboard: {user['nome']}")
     pago = user.get('status_pagamento', False)
     if not pago:
+        # GATILHO: Passa o nome completo do cadastro para a notificação
         notificar_pagamento_admin(user['nome'], user['email'])
+        
         st.error("⚠️ Seu acesso está pendente de renovação ou pagamento.")
         with st.expander("💳 Dados para Pagamento PIX", expanded=True):
             st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(pix_copia_e_cola)}")
