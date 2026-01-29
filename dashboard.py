@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v3.4 (MENSAGEM PIX RESTAURADA)
+# VERSÃO: v3.5 (REMOÇÃO DO TEXTO DE COMPROVANTE)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v3.4", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v3.5", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES SEGURAS ---
 try:
@@ -20,7 +20,7 @@ except Exception as e:
     st.error("Erro nas Secrets: Verifique as chaves no Streamlit Cloud.")
     st.stop()
 
-# --- REDIRECT URI ATUALIZADA ---
+# --- REDIRECT URI ---
 REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
 
 chave_pix_visivel = "fabioh1979@hotmail.com"
@@ -157,7 +157,7 @@ else:
     st.title(f"🚀 Dashboard: {user['nome']}")
     pago = user.get('status_pagamento', False)
     
-    # --- BLOCO FINANCEIRO RESTAURADO ---
+    # --- BLOCO FINANCEIRO (MENSAGEM AJUSTADA) ---
     if not pago:
         st.error("⚠️ Seu acesso está pendente de renovação ou pagamento.")
         st.markdown("""
@@ -170,7 +170,7 @@ else:
             st.code(pix_copia_e_cola, language="text")
             st.caption("Dica: Copie o código acima e cole no aplicativo do seu banco na opção 'PIX Copia e Cola'.")
         
-        st.warning("Após realizar o pagamento, envie o comprovante para o treinador Fábio. Seu acesso será liberado em instantes.")
+        # REMOVIDO: Mensagem de envio de comprovante
         st.stop()
 
     st.info(f"📅 Seu plano vence em: **{formatar_data_br(user.get('data_vencimento'))}**")
