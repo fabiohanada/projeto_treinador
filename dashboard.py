@@ -1,15 +1,14 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 from datetime import datetime, date
 import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v4.7 (FORÇAR NOTIFICAÇÃO VERMELHA)
+# VERSÃO: v4.8 (FIX ERRO DE CARREGAMENTO)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v4.7", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v4.8", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES ---
 try:
@@ -31,26 +30,24 @@ def formatar_data_br(data_str):
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
 
-# FUNÇÃO DE NOTIFICAÇÃO REFORÇADA
+# FUNÇÃO DE NOTIFICAÇÃO SIMPLIFICADA PARA EVITAR ERROS
 def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
     try:
-        # Força o envio da mensagem exata solicitada
-        msg = f"Novo pagamento detectado {aluno_nome_completo.upper()}, por favor conferir na sua conta bancaria."
-        dados = {
-            "email_aluno": aluno_email,
-            "mensagem": msg,
-            "lida": False,
-            "updated_at": datetime.now().isoformat()
-        }
-        supabase.table("alertas_admin").upsert(dados, on_conflict="email_aluno").execute()
-    except Exception as e:
-        # Se falhar aqui, o erro apareceria nos logs do Streamlit
+        # Verifica se já existe um alerta não lido para este aluno hoje
+        check = supabase.table("alertas_admin").select("*").eq("email_aluno", aluno_email).eq("lida", False).execute()
+        
+        if not check.data:
+            msg = f"Novo pagamento detectado {aluno_nome_completo.upper()}, por favor conferir na sua conta bancaria."
+            supabase.table("alertas_admin").insert({
+                "email_aluno": aluno_email,
+                "mensagem": msg,
+                "lida": False
+            }).execute()
+    except:
         pass
 
 # --- LOGICA DE LOGIN ---
 if "logado" not in st.session_state: st.session_state.logado = False
-if "code" in st.query_params: st.session_state.strava_code = st.query_params["code"]
-
 if "user_mail" in st.query_params and not st.session_state.logado:
     u = supabase.table("usuarios_app").select("*").eq("email", st.query_params["user_mail"]).execute()
     if u.data: st.session_state.logado, st.session_state.user_info = True, u.data[0]
@@ -59,17 +56,15 @@ if not st.session_state.logado:
     st.markdown("<h2 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h2>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
     with c2:
-        tab_login, tab_cadastro = st.tabs(["🔑 Entrar", "📝 Novo Aluno"])
-        with tab_login:
-            with st.form("login_form"):
-                e, s = st.text_input("E-mail"), st.text_input("Senha", type="password")
-                if st.form_submit_button("Acessar Painel", use_container_width=True):
-                    u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
-                    if u.data:
-                        st.session_state.logado, st.session_state.user_info = True, u.data[0]
-                        st.query_params["user_mail"] = e
-                        st.rerun()
-                    else: st.error("Dados incorretos.")
+        with st.form("login_form"):
+            e, s = st.text_input("E-mail"), st.text_input("Senha", type="password")
+            if st.form_submit_button("Acessar Painel", use_container_width=True):
+                u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
+                if u.data:
+                    st.session_state.logado, st.session_state.user_info = True, u.data[0]
+                    st.query_params["user_mail"] = e
+                    st.rerun()
+                else: st.error("Dados incorretos.")
     st.stop()
 
 user = st.session_state.user_info
@@ -85,34 +80,34 @@ with st.sidebar:
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
     
+    st.subheader("🔔 Notificações de Pagamento")
+    
+    # Tentativa de carregar alertas com tratamento de erro
     try:
-        col_tit, col_btn = st.columns([3, 1])
-        with col_tit:
-            st.subheader("🔔 Notificações de Pagamento")
-        with col_btn:
-            # Botão para forçar a busca no banco
-            if st.button("🔄 Atualizar", use_container_width=True):
-                st.cache_data.clear()
-                st.rerun()
-
-        # Busca alertas não lidos
-        alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
+        res_alertas = supabase.table("alertas_admin").select("*").eq("lida", False).order("created_at", desc=True).execute()
         
-        if alertas.data:
-            for a in alertas.data:
-                # EXIBE EM VERMELHO CONFORME SOLICITADO
-                st.error(f"⚠️ **{a['mensagem']}**")
+        if res_alertas.data:
+            for a in res_alertas.data:
+                # MENSAGEM EM VERMELHO VIVO
+                st.error(f"🚨 {a['mensagem']}")
             
-            if st.button("Limpar todas as notificações", type="primary", use_container_width=True):
+            if st.button("Marcar todos como lidos", type="primary"):
                 supabase.table("alertas_admin").update({"lida": True}).eq("lida", False).execute()
                 st.rerun()
         else:
             st.info("Nenhum pagamento novo pendente de conferência.")
-        st.divider()
-    except:
-        st.warning("Erro ao carregar notificações.")
+            
+        if st.button("🔄 Atualizar Lista"):
+            st.rerun()
+            
+    except Exception as e:
+        st.warning("Aguardando inicialização da tabela de alertas...")
+        if st.button("🔄 Tentar Novamente"):
+            st.rerun()
 
-    # Listagem de Alunos (Gestão)
+    st.divider()
+
+    # Gestão de Alunos
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     for aluno in alunos.data:
         with st.container(border=True):
@@ -138,13 +133,14 @@ if eh_admin:
 else:
     st.title(f"🚀 Dashboard: {user['nome']}")
     if not user.get('status_pagamento', False):
-        # GERA A NOTIFICAÇÃO ASSIM QUE O ALUNO ENTRA NA TELA DE BLOQUEIO
+        # DISPARA O ALERTA
         notificar_pagamento_admin(user['nome'], user['email'])
         
         st.error("⚠️ Acesso pendente de renovação ou pagamento.")
-        with st.expander("💳 Instruções de Pagamento", expanded=True):
+        with st.expander("💳 Dados para Pagamento PIX", expanded=True):
             st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(pix_copia_e_cola)}")
             st.info(f"**Chave PIX (E-mail):** {chave_pix_visivel}")
             st.code(pix_copia_e_cola)
         st.stop()
-    st.info(f"📅 Vencimento: **{formatar_data_br(user.get('data_vencimento'))}**")
+    
+    st.success(f"📅 Plano ativo até: **{formatar_data_br(user.get('data_vencimento'))}**")
