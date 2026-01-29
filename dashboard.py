@@ -6,12 +6,12 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v2.7 (BOTÃO CSS + PROTEÇÃO DE DATA)
+# VERSÃO: v2.8 (CORREÇÃO DE SINTAXE E LAYOUT)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v2.7", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v2.8", layout="wide", page_icon="🏃‍♂️")
 
-# --- CONEXÕES SEGURAS (SECRETS) ---
+# --- CONEXÕES SEGURAS ---
 try:
     supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
     CLIENT_ID = st.secrets["STRAVA_CLIENT_ID"]
@@ -24,8 +24,9 @@ REDIRECT_URI = "https://projeto-treinador.streamlit.app/"
 chave_pix_visivel = "fabioh1979@hotmail.com"
 pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
 
-# --- FUNÇÕES AUXILIARES ---
-def hash_senha(senha): return hashlib.sha256(str.encode(senha)).hexdigest()
+# --- FUNÇÕES ---
+def hash_senha(senha): 
+    return hashlib.sha256(str.encode(senha)).hexdigest()
 
 def formatar_data_br(data_str):
     if not data_str or str(data_str) == "None": return "Pendente"
@@ -62,7 +63,7 @@ def sincronizar_strava(auth_code, aluno_id):
     except: return False
     return False
 
-# --- LÓGICA DE LOGIN E REDIRECT ---
+# --- LOGICA DE LOGIN ---
 if "logado" not in st.session_state: st.session_state.logado = False
 if "code" in st.query_params: st.session_state.strava_code = st.query_params["code"]
 
@@ -90,13 +91,11 @@ if not st.session_state.logado:
 user = st.session_state.user_info
 eh_admin = user.get('is_admin', False)
 
-# --- SIDEBAR (BARRA LATERAL) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.markdown(f"### Bem-vindo, \n**{user['nome']}**")
     st.write("---")
-    
     if not eh_admin:
-        # BOTÃO STRAVA ESTILIZADO EM CSS (Para não quebrar imagem)
         link_strava = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&scope=activity:read_all&approval_prompt=force"
         st.markdown(f'''
             <a href="{link_strava}" target="_blank" style="text-decoration: none;">
@@ -105,49 +104,54 @@ with st.sidebar:
                 </div>
             </a>
         ''', unsafe_allow_html=True)
-        
         if "strava_code" in st.session_state:
             with st.spinner("Sincronizando..."):
                 if sincronizar_strava(st.session_state.strava_code, user['id']):
                     st.success("Treinos atualizados!")
                     del st.session_state.strava_code
                     st.rerun()
-
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.clear()
         st.query_params.clear()
         st.rerun()
 
-# --- ÁREA ADMINISTRATIVA ---
+# --- ÁREA ADMIN ---
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
-    
     for aluno in alunos.data:
         with st.container(border=True):
             col1, col2, col3 = st.columns([2, 2, 1])
             with col1:
                 st.markdown(f"**{aluno['nome']}**")
-                pago = "✅ Ativo" if aluno['status_pagamento'] else "❌ Pendente"
-                st.write(f"Status: {pago}")
+                st.write(f"Status: {'✅ Ativo' if aluno['status_pagamento'] else '❌ Pendente'}")
             with col2:
-                # BLINDAGEM CONTRA DATA NONE
                 dt_banco = aluno.get('data_vencimento')
-                try:
-                    val_data = datetime.strptime(str(dt_banco), '%Y-%m-%d').date() if dt_banco and str(dt_banco) != "None" else date.today()
-                except:
-                    val_data = date.today()
+                try: val_data = datetime.strptime(str(dt_banco), '%Y-%m-%d').date() if dt_banco and str(dt_banco) != "None" else date.today()
+                except: val_data = date.today()
                 nova_dt = st.date_input("Vencimento", value=val_data, key=f"d_{aluno['id']}")
             with col3:
-                st.write("")
                 if st.button("Salvar", key=f"s_{aluno['id']}", use_container_width=True):
                     supabase.table("usuarios_app").update({"data_vencimento": str(nova_dt)}).eq("id", aluno['id']).execute()
                     st.success("Ok!")
-
-# --- ÁREA DO ALUNO ---
+# --- ÁREA ALUNO ---
 else:
     st.title(f"🚀 Dashboard de Performance")
     st.info(f"📅 Seu plano vence em: **{formatar_data_br(user.get('data_vencimento'))}**")
+    
+    # AQUI ESTAVA O ERRO DE SINTAXE - LINHA CORRIGIDA ABAIXO
+    res = supabase.table("treinos_alunos").select("*").eq("aluno_id", user['id']).order("data", desc=True).execute()
+    df = pd.DataFrame(res.data)
 
-    # Busca treinos sincronizados
-    res = supabase.table("treinos_alunos").select("*").eq("al
+    if not df.empty:
+        df['TRIMP'] = df['tempo_min'] * (df['fc_media'] / 100)
+        c1, c2 = st.columns(2)
+        with c1: st.plotly_chart(px.bar(df, x='data', y='TRIMP', title="Carga (TRIMP)", color_discrete_sequence=['#FC4C02']), use_container_width=True)
+        with c2:
+            fig = px.line(df, x='data', y='fc_media', title="FC Média", markers=True)
+            fig.add_hline(y=130, line_dash="dash", line_color="green")
+            st.plotly_chart(fig, use_container_width=True)
+        st.subheader("📋 Histórico")
+        st.dataframe(df[['data', 'nome_treino', 'distancia', 'tempo_min', 'fc_media', 'TRIMP']], use_container_width=True, hide_index=True)
+    else:
+        st.warning("Conecte ao Strava na lateral para carregar seus treinos!")
