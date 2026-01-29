@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v3.3 (REDIRECT URI ATUALIZADA)
+# VERSÃO: v3.4 (MENSAGEM PIX RESTAURADA)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v3.3", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v3.4", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES SEGURAS ---
 try:
@@ -20,7 +20,7 @@ except Exception as e:
     st.error("Erro nas Secrets: Verifique as chaves no Streamlit Cloud.")
     st.stop()
 
-# --- ATUALIZAÇÃO DA URI DE REDIRECIONAMENTO ---
+# --- REDIRECT URI ATUALIZADA ---
 REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
 
 chave_pix_visivel = "fabioh1979@hotmail.com"
@@ -37,12 +37,7 @@ def formatar_data_br(data_str):
 
 def sincronizar_strava(auth_code, aluno_id):
     token_url = "https://www.strava.com/oauth/token"
-    payload = {
-        'client_id': CLIENT_ID, 
-        'client_secret': CLIENT_SECRET, 
-        'code': auth_code, 
-        'grant_type': 'authorization_code'
-    }
+    payload = {'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET, 'code': auth_code, 'grant_type': 'authorization_code'}
     try:
         r = requests.post(token_url, data=payload).json()
         if 'access_token' in r:
@@ -161,11 +156,21 @@ if eh_admin:
 else:
     st.title(f"🚀 Dashboard: {user['nome']}")
     pago = user.get('status_pagamento', False)
+    
+    # --- BLOCO FINANCEIRO RESTAURADO ---
     if not pago:
-        st.error("⚠️ Seu acesso está pendente de renovação.")
-        with st.expander("💳 Dados para Pagamento PIX", expanded=True):
+        st.error("⚠️ Seu acesso está pendente de renovação ou pagamento.")
+        st.markdown("""
+        ### 💳 Instruções de Pagamento
+        Para liberar seu acesso aos gráficos de performance e histórico do Strava, realize o pagamento da sua mensalidade via PIX.
+        """)
+        with st.expander("Clique aqui para ver o QR Code e Chave PIX", expanded=True):
             st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(pix_copia_e_cola)}")
-            st.code(chave_pix_visivel, language="text")
+            st.info(f"**Chave PIX (E-mail):** {chave_pix_visivel}")
+            st.code(pix_copia_e_cola, language="text")
+            st.caption("Dica: Copie o código acima e cole no aplicativo do seu banco na opção 'PIX Copia e Cola'.")
+        
+        st.warning("Após realizar o pagamento, envie o comprovante para o treinador Fábio. Seu acesso será liberado em instantes.")
         st.stop()
 
     st.info(f"📅 Seu plano vence em: **{formatar_data_br(user.get('data_vencimento'))}**")
