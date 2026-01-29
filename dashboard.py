@@ -20,7 +20,7 @@ except Exception as e:
     st.error("Erro nas Secrets: Verifique as chaves no Streamlit Cloud.")
     st.stop()
 
-REDIRECT_URI = "https://projeto-treinador.streamlit.app/" 
+REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
 chave_pix_visivel = "fabioh1979@hotmail.com"
 pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
 
