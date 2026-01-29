@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v3.5 (REMOÇÃO DO TEXTO DE COMPROVANTE)
+# VERSÃO: v3.6 (GATILHO DE NOTIFICAÇÃO ADMIN)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v3.5", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v3.6", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES SEGURAS ---
 try:
@@ -17,12 +17,10 @@ try:
     CLIENT_ID = st.secrets["STRAVA_CLIENT_ID"]
     CLIENT_SECRET = st.secrets["STRAVA_CLIENT_SECRET"]
 except Exception as e:
-    st.error("Erro nas Secrets: Verifique as chaves no Streamlit Cloud.")
+    st.error("Erro nas Secrets.")
     st.stop()
 
-# --- REDIRECT URI ---
 REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
-
 chave_pix_visivel = "fabioh1979@hotmail.com"
 pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
 
@@ -34,6 +32,20 @@ def formatar_data_br(data_str):
     if not data_str or str(data_str) == "None": return "Pendente"
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
+
+# NOVA FUNÇÃO: NOTIFICAR ADMIN
+def notificar_pagamento_admin(aluno_nome, aluno_email):
+    try:
+        dados_notificacao = {
+            "mensagem": f"O aluno {aluno_nome} acessou a área de pagamento.",
+            "lida": False,
+            "created_at": datetime.now().isoformat(),
+            "email_aluno": aluno_email
+        }
+        # Insere na tabela de alertas (certifique-se que ela existe no Supabase)
+        supabase.table("alertas_admin").insert(dados_notificacao).execute()
+    except:
+        pass # Silencioso para não travar o app do aluno
 
 def sincronizar_strava(auth_code, aluno_id):
     token_url = "https://www.strava.com/oauth/token"
@@ -47,12 +59,9 @@ def sincronizar_strava(auth_code, aluno_id):
             for act in atividades:
                 if act['type'] == 'Run':
                     dados = {
-                        "aluno_id": aluno_id,
-                        "data": act['start_date_local'][:10],
-                        "nome_treino": act['name'],
-                        "distancia": round(act['distance'] / 1000, 2),
-                        "tempo_min": round(act['moving_time'] / 60, 2),
-                        "fc_media": act.get('average_heartrate', 130),
+                        "aluno_id": aluno_id, "data": act['start_date_local'][:10],
+                        "nome_treino": act['name'], "distancia": round(act['distance'] / 1000, 2),
+                        "tempo_min": round(act['moving_time'] / 60, 2), "fc_media": act.get('average_heartrate', 130),
                         "strava_id": str(act['id'])
                     }
                     supabase.table("treinos_alunos").upsert(dados, on_conflict="strava_id").execute()
@@ -60,7 +69,7 @@ def sincronizar_strava(auth_code, aluno_id):
     except: return False
     return False
 
-# --- LOGICA DE LOGIN E ACESSO ---
+# --- LOGICA DE LOGIN ---
 if "logado" not in st.session_state: st.session_state.logado = False
 if "code" in st.query_params: st.session_state.strava_code = st.query_params["code"]
 
@@ -69,7 +78,6 @@ if "user_mail" in st.query_params and not st.session_state.logado:
     if u.data:
         st.session_state.logado, st.session_state.user_info = True, u.data[0]
 
-# --- TELA INICIAL (LOGIN + CADASTRO) ---
 if not st.session_state.logado:
     st.markdown("<h2 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h2>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
@@ -77,8 +85,7 @@ if not st.session_state.logado:
         tab_login, tab_cadastro = st.tabs(["🔑 Entrar", "📝 Novo Aluno"])
         with tab_login:
             with st.form("login_form"):
-                e = st.text_input("E-mail")
-                s = st.text_input("Senha", type="password")
+                e, s = st.text_input("E-mail"), st.text_input("Senha", type="password")
                 if st.form_submit_button("Acessar Painel", use_container_width=True):
                     u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
                     if u.data:
@@ -88,18 +95,14 @@ if not st.session_state.logado:
                     else: st.error("Dados incorretos.")
         with tab_cadastro:
             with st.form("cadastro_form"):
-                nome_c = st.text_input("Nome Completo")
-                email_c = st.text_input("E-mail")
-                senha_c = st.text_input("Crie uma Senha", type="password")
-                st.markdown("---")
+                n_c, e_c, s_c = st.text_input("Nome Completo"), st.text_input("E-mail"), st.text_input("Senha", type="password")
                 lgpd = st.checkbox("Li e aceito os Termos de Uso e LGPD.")
                 if st.form_submit_button("Cadastrar", use_container_width=True):
-                    if lgpd and nome_c and email_c and senha_c:
+                    if lgpd and n_c and e_c and s_c:
                         try:
-                            supabase.table("usuarios_app").insert({"nome": nome_c, "email": email_c, "senha": hash_senha(senha_c), "status_pagamento": False, "data_vencimento": str(date.today())}).execute()
-                            st.success("Cadastrado! Faça login na aba ao lado.")
+                            supabase.table("usuarios_app").insert({"nome": n_c, "email": e_c, "senha": hash_senha(s_c), "status_pagamento": False, "data_vencimento": str(date.today())}).execute()
+                            st.success("Cadastrado! Faça login.")
                         except: st.error("Erro no cadastro.")
-                    else: st.warning("Preencha tudo e aceite os termos.")
     st.stop()
 
 user = st.session_state.user_info
@@ -108,45 +111,42 @@ eh_admin = user.get('is_admin', False)
 # --- SIDEBAR ---
 with st.sidebar:
     st.markdown(f"### 👤 {user['nome']}")
-    st.write("---")
     if not eh_admin:
         link_strava = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&scope=activity:read_all&approval_prompt=force"
         st.markdown(f'''<a href="{link_strava}" target="_blank" style="text-decoration: none;"><div style="background-color: #FC4C02; color: white; padding: 12px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 20px;">🟠 CONECTAR COM STRAVA</div></a>''', unsafe_allow_html=True)
         if "strava_code" in st.session_state:
-            with st.spinner("Sincronizando..."):
-                if sincronizar_strava(st.session_state.strava_code, user['id']):
-                    st.success("Sincronizado!")
-                    del st.session_state.strava_code
-                    st.rerun()
+            if sincronizar_strava(st.session_state.strava_code, user['id']):
+                st.success("Sincronizado!"); del st.session_state.strava_code; st.rerun()
     if st.button("🚪 Sair", use_container_width=True):
-        st.session_state.clear()
-        st.query_params.clear()
-        st.rerun()
+        st.session_state.clear(); st.query_params.clear(); st.rerun()
 
 # --- PAINEL ADMIN (TRANCADO) ---
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
-    st.subheader("Gestão de Alunos")
+    # Pequena adição: Contador de alertas
+    alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
+    if alertas.data:
+        st.warning(f"🔔 Você tem {len(alertas.data)} novos avisos de pagamento!")
+        if st.button("Limpar Alertas"):
+            supabase.table("alertas_admin").update({"lida": True}).eq("lida", False).execute()
+            st.rerun()
+
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     for aluno in alunos.data:
         with st.container(border=True):
             col1, col2, col3 = st.columns([2, 2, 1.5])
             with col1:
                 st.markdown(f"#### {aluno['nome']}")
-                st.caption(f"📧 {aluno['email']}")
-                status_atual = "✅ Ativo" if aluno['status_pagamento'] else "❌ Bloqueado"
-                st.markdown(f"**Status:** {status_atual}")
+                st.markdown(f"**Status:** {'✅ Ativo' if aluno['status_pagamento'] else '❌ Bloqueado'}")
             with col2:
                 dt_banco = aluno.get('data_vencimento')
                 try: val_data = datetime.strptime(str(dt_banco), '%Y-%m-%d').date() if dt_banco and str(dt_banco) != "None" else date.today()
                 except: val_data = date.today()
                 nova_dt = st.date_input("Vencimento", value=val_data, key=f"dt_{aluno['id']}")
-                st.write(f"Vence em: {formatar_data_br(dt_banco)}")
             with col3:
-                st.write("") 
                 if st.button("💾 Salvar Data", key=f"sv_{aluno['id']}", use_container_width=True):
                     supabase.table("usuarios_app").update({"data_vencimento": str(nova_dt)}).eq("id", aluno['id']).execute()
-                    st.success("Data Atualizada!")
+                    st.success("Ok!")
                 label_btn = "🔒 Bloquear" if aluno['status_pagamento'] else "🔓 Liberar Acesso"
                 if st.button(label_btn, key=f"ac_{aluno['id']}", use_container_width=True):
                     supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
@@ -157,35 +157,28 @@ else:
     st.title(f"🚀 Dashboard: {user['nome']}")
     pago = user.get('status_pagamento', False)
     
-    # --- BLOCO FINANCEIRO (MENSAGEM AJUSTADA) ---
     if not pago:
+        # GATILHO DE NOTIFICAÇÃO (Fica aqui para avisar o Admin assim que o aluno vê o PIX)
+        notificar_pagamento_admin(user['nome'], user['email'])
+        
         st.error("⚠️ Seu acesso está pendente de renovação ou pagamento.")
-        st.markdown("""
-        ### 💳 Instruções de Pagamento
-        Para liberar seu acesso aos gráficos de performance e histórico do Strava, realize o pagamento da sua mensalidade via PIX.
-        """)
-        with st.expander("Clique aqui para ver o QR Code e Chave PIX", expanded=True):
+        with st.expander("💳 Dados para Pagamento PIX", expanded=True):
             st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(pix_copia_e_cola)}")
             st.info(f"**Chave PIX (E-mail):** {chave_pix_visivel}")
             st.code(pix_copia_e_cola, language="text")
-            st.caption("Dica: Copie o código acima e cole no aplicativo do seu banco na opção 'PIX Copia e Cola'.")
-        
-        # REMOVIDO: Mensagem de envio de comprovante
         st.stop()
 
     st.info(f"📅 Seu plano vence em: **{formatar_data_br(user.get('data_vencimento'))}**")
     res = supabase.table("treinos_alunos").select("*").eq("aluno_id", user['id']).order("data", desc=True).execute()
     df = pd.DataFrame(res.data)
-
     if not df.empty:
         df['TRIMP'] = df['tempo_min'] * (df['fc_media'] / 100)
         c1, c2 = st.columns(2)
         with c1: st.plotly_chart(px.bar(df, x='data', y='TRIMP', title="Carga (TRIMP)", color_discrete_sequence=['#FC4C02']), use_container_width=True)
         with c2:
             fig = px.line(df, x='data', y='fc_media', title="FC Média", markers=True)
-            fig.add_hline(y=130, line_dash="dash", line_color="green", annotation_text="Meta 130bpm")
+            fig.add_hline(y=130, line_dash="dash", line_color="green")
             st.plotly_chart(fig, use_container_width=True)
-        st.subheader("📋 Histórico de Treinos")
         st.dataframe(df[['data', 'nome_treino', 'distancia', 'tempo_min', 'fc_media', 'TRIMP']], use_container_width=True, hide_index=True)
     else:
-        st.warning("Conecte ao Strava na lateral para carregar seus dados!")
+        st.warning("Conecte ao Strava na lateral!")
