@@ -1,15 +1,15 @@
 import streamlit as st
-import pd as pd
+import pandas as pd  # <--- Corrigido aqui (estava apenas 'pd')
 import plotly.express as px
 from datetime import datetime, date
 import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v3.8 (ALERTA COM NOME COMPLETO)
+# VERSÃO: v3.9 (CORREÇÃO DE IMPORT + NOME COMPLETO)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v3.8", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v3.9", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES SEGURAS ---
 try:
@@ -33,7 +33,6 @@ def formatar_data_br(data_str):
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
 
-# FUNÇÃO DE NOTIFICAÇÃO ATUALIZADA COM NOME COMPLETO
 def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
     try:
         supabase.table("alertas_admin").insert({
@@ -116,10 +115,9 @@ with st.sidebar:
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.clear(); st.query_params.clear(); st.rerun()
 
-# --- PAINEL ADMIN (ESTRUTURA TRANCADA) ---
+# --- PAINEL ADMIN (TRANCADO) ---
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
-    
     try:
         alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
         if alertas.data:
@@ -154,9 +152,7 @@ if eh_admin:
 else:
     st.title(f"🚀 Dashboard: {user['nome']}")
     pago = user.get('status_pagamento', False)
-    
     if not pago:
-        # Envia o nome completo contido na variável user['nome']
         notificar_pagamento_admin(user['nome'], user['email'])
         st.error("⚠️ Seu acesso está pendente de renovação ou pagamento.")
         with st.expander("💳 Dados para Pagamento PIX", expanded=True):
