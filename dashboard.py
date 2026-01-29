@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v4.2 (ALERTA DE PIX REALIZADO)
+# VERSÃO: v4.3 (MENSAGEM DE ALERTA DEFINIDA)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v4.2", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v4.3", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES SEGURAS ---
 try:
@@ -33,12 +33,12 @@ def formatar_data_br(data_str):
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
 
-# FUNÇÃO DE ALERTA: AFIRMA QUE O PIX FOI FEITO
+# FUNÇÃO DE ALERTA COM A FRASE ESPECÍFICA
 def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
     try:
         dados = {
             "email_aluno": aluno_email,
-            "mensagem": f"✅ PIX REALIZADO: {aluno_nome_completo.upper()}",
+            "mensagem": f"💰 Pagamento Realizado - Conferir no Banco ({aluno_nome_completo.upper()})",
             "lida": False,
             "updated_at": datetime.now().isoformat()
         }
@@ -125,8 +125,8 @@ if eh_admin:
         alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
         if alertas.data:
             for a in alertas.data:
-                st.success(f"💰 {a['mensagem']}")
-            if st.button("Confirmar Leitura dos Pagamentos"):
+                st.success(f"{a['mensagem']}")
+            if st.button("Limpar Alertas de Pagamento"):
                 supabase.table("alertas_admin").update({"lida": True}).eq("lida", False).execute()
                 st.rerun()
     except: pass 
