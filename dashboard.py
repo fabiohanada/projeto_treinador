@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v4.6 (ALERTA EM VERMELHO E FRASE PERSONALIZADA)
+# VERSÃO: v4.7 (FORÇAR NOTIFICAÇÃO VERMELHA)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v4.6", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v4.7", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES ---
 try:
@@ -31,17 +31,21 @@ def formatar_data_br(data_str):
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
 
-# FUNÇÃO DE NOTIFICAÇÃO COM A NOVA FRASE
+# FUNÇÃO DE NOTIFICAÇÃO REFORÇADA
 def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
     try:
+        # Força o envio da mensagem exata solicitada
+        msg = f"Novo pagamento detectado {aluno_nome_completo.upper()}, por favor conferir na sua conta bancaria."
         dados = {
             "email_aluno": aluno_email,
-            "mensagem": f"Novo pagamento detectado {aluno_nome_completo.upper()}, por favor conferir na sua conta bancaria.",
+            "mensagem": msg,
             "lida": False,
             "updated_at": datetime.now().isoformat()
         }
         supabase.table("alertas_admin").upsert(dados, on_conflict="email_aluno").execute()
-    except: pass
+    except Exception as e:
+        # Se falhar aqui, o erro apareceria nos logs do Streamlit
+        pass
 
 # --- LOGICA DE LOGIN ---
 if "logado" not in st.session_state: st.session_state.logado = False
@@ -86,13 +90,17 @@ if eh_admin:
         with col_tit:
             st.subheader("🔔 Notificações de Pagamento")
         with col_btn:
+            # Botão para forçar a busca no banco
             if st.button("🔄 Atualizar", use_container_width=True):
+                st.cache_data.clear()
                 st.rerun()
 
+        # Busca alertas não lidos
         alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
+        
         if alertas.data:
             for a in alertas.data:
-                # ALTERADO PARA VERMELHO (st.error) E FRASE NOVA
+                # EXIBE EM VERMELHO CONFORME SOLICITADO
                 st.error(f"⚠️ **{a['mensagem']}**")
             
             if st.button("Limpar todas as notificações", type="primary", use_container_width=True):
@@ -102,9 +110,9 @@ if eh_admin:
             st.info("Nenhum pagamento novo pendente de conferência.")
         st.divider()
     except:
-        pass
+        st.warning("Erro ao carregar notificações.")
 
-    # Gestão de Alunos
+    # Listagem de Alunos (Gestão)
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     for aluno in alunos.data:
         with st.container(border=True):
@@ -130,11 +138,13 @@ if eh_admin:
 else:
     st.title(f"🚀 Dashboard: {user['nome']}")
     if not user.get('status_pagamento', False):
+        # GERA A NOTIFICAÇÃO ASSIM QUE O ALUNO ENTRA NA TELA DE BLOQUEIO
         notificar_pagamento_admin(user['nome'], user['email'])
-        st.error("⚠️ Acesso pendente de pagamento.")
-        with st.expander("💳 Dados PIX", expanded=True):
+        
+        st.error("⚠️ Acesso pendente de renovação ou pagamento.")
+        with st.expander("💳 Instruções de Pagamento", expanded=True):
             st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(pix_copia_e_cola)}")
-            st.info(f"**Chave PIX:** {chave_pix_visivel}")
+            st.info(f"**Chave PIX (E-mail):** {chave_pix_visivel}")
             st.code(pix_copia_e_cola)
         st.stop()
     st.info(f"📅 Vencimento: **{formatar_data_br(user.get('data_vencimento'))}**")
