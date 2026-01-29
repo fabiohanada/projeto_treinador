@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v4.5 (BOTÃO ATUALIZAR ALERTAS)
+# VERSÃO: v4.6 (ALERTA EM VERMELHO E FRASE PERSONALIZADA)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v4.5", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v4.6", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES ---
 try:
@@ -31,18 +31,19 @@ def formatar_data_br(data_str):
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
 
+# FUNÇÃO DE NOTIFICAÇÃO COM A NOVA FRASE
 def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
     try:
         dados = {
             "email_aluno": aluno_email,
-            "mensagem": f"💰 Pagamento Realizado - Conferir no Banco ({aluno_nome_completo.upper()})",
+            "mensagem": f"Novo pagamento detectado {aluno_nome_completo.upper()}, por favor conferir na sua conta bancaria.",
             "lida": False,
             "updated_at": datetime.now().isoformat()
         }
         supabase.table("alertas_admin").upsert(dados, on_conflict="email_aluno").execute()
     except: pass
 
-# --- LOGIN ---
+# --- LOGICA DE LOGIN ---
 if "logado" not in st.session_state: st.session_state.logado = False
 if "code" in st.query_params: st.session_state.strava_code = st.query_params["code"]
 
@@ -80,7 +81,6 @@ with st.sidebar:
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
     
-    # Seção de Alertas com Botão Atualizar
     try:
         col_tit, col_btn = st.columns([3, 1])
         with col_tit:
@@ -92,7 +92,9 @@ if eh_admin:
         alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
         if alertas.data:
             for a in alertas.data:
-                st.success(f"**{a['mensagem']}**")
+                # ALTERADO PARA VERMELHO (st.error) E FRASE NOVA
+                st.error(f"⚠️ **{a['mensagem']}**")
+            
             if st.button("Limpar todas as notificações", type="primary", use_container_width=True):
                 supabase.table("alertas_admin").update({"lida": True}).eq("lida", False).execute()
                 st.rerun()
