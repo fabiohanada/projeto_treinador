@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v4.9 (RETORNO DOS GRÁFICOS + STRAVA)
+# VERSÃO: v5.0 (FIX REDIRECIONAMENTO STRAVA)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v4.9", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v5.0", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES ---
 try:
@@ -20,6 +20,7 @@ except Exception as e:
     st.error("Erro nas Secrets.")
     st.stop()
 
+# URL dinâmica para funcionar tanto local quanto no Cloud
 REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
 chave_pix_visivel = "fabioh1979@hotmail.com"
 pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
@@ -61,14 +62,24 @@ def sincronizar_strava(auth_code, aluno_id):
     except: return False
     return False
 
-# --- LÓGICA DE LOGIN ---
-if "logado" not in st.session_state: st.session_state.logado = False
-if "code" in st.query_params: st.session_state.strava_code = st.query_params["code"]
+# --- LÓGICA DE SESSÃO PERSISTENTE ---
+if "logado" not in st.session_state: 
+    st.session_state.logado = False
 
-if "user_mail" in st.query_params and not st.session_state.logado:
-    u = supabase.table("usuarios_app").select("*").eq("email", st.query_params["user_mail"]).execute()
-    if u.data: st.session_state.logado, st.session_state.user_info = True, u.data[0]
+# 1. Verifica se está voltando do Strava (tem 'code' na URL)
+params = st.query_params
+if "code" in params and "user_mail" in params:
+    # Se tem o e-mail na URL, reconecta automaticamente
+    u = supabase.table("usuarios_app").select("*").eq("email", params["user_mail"]).execute()
+    if u.data:
+        st.session_state.logado = True
+        st.session_state.user_info = u.data[0]
+        # Sincroniza e limpa o código da URL para não repetir
+        sincronizar_strava(params["code"], u.data[0]['id'])
+        st.query_params.clear()
+        st.query_params["user_mail"] = u.data[0]['email'] # Mantém o rastro do login
 
+# 2. Login manual
 if not st.session_state.logado:
     st.markdown("<h2 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h2>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
@@ -78,8 +89,9 @@ if not st.session_state.logado:
             if st.form_submit_button("Acessar Painel", use_container_width=True):
                 u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
                 if u.data:
-                    st.session_state.logado, st.session_state.user_info = True, u.data[0]
-                    st.query_params["user_mail"] = e
+                    st.session_state.logado = True
+                    st.session_state.user_info = u.data[0]
+                    st.query_params["user_mail"] = e # Salva na URL para o Strava saber quem é na volta
                     st.rerun()
                 else: st.error("Dados incorretos.")
     st.stop()
@@ -91,13 +103,16 @@ eh_admin = user.get('is_admin', False)
 with st.sidebar:
     st.markdown(f"### 👤 {user['nome']}")
     if not eh_admin:
-        link_strava = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&scope=activity:read_all&approval_prompt=force"
-        st.markdown(f'''<a href="{link_strava}" target="_blank" style="text-decoration: none;"><div style="background-color: #FC4C02; color: white; padding: 12px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 20px;">🟠 CONECTAR COM STRAVA</div></a>''', unsafe_allow_html=True)
-        if "strava_code" in st.session_state:
-            if sincronizar_strava(st.session_state.strava_code, user['id']):
-                st.success("Sincronizado!"); del st.session_state.strava_code; st.rerun()
+        # Adicionamos o e-mail do usuário na volta do Strava para o app saber quem logar
+        redirect_com_email = f"{REDIRECT_URI}?user_mail={user['email']}"
+        link_strava = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={urllib.parse.quote(redirect_com_email)}&scope=activity:read_all&approval_prompt=auto"
+        
+        st.markdown(f'''<a href="{link_strava}" target="_self" style="text-decoration: none;"><div style="background-color: #FC4C02; color: white; padding: 12px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 20px;">🟠 ATUALIZAR TREINOS (STRAVA)</div></a>''', unsafe_allow_html=True)
+    
     if st.button("🚪 Sair", use_container_width=True):
-        st.session_state.clear(); st.query_params.clear(); st.rerun()
+        st.session_state.clear()
+        st.query_params.clear()
+        st.rerun()
 
 # --- PAINEL ADMIN ---
 if eh_admin:
@@ -151,7 +166,6 @@ else:
     
     st.info(f"📅 Plano ativo até: **{formatar_data_br(user.get('data_vencimento'))}**")
     
-    # --- GRÁFICOS E DADOS (RECUPERADOS) ---
     res = supabase.table("treinos_alunos").select("*").eq("aluno_id", user['id']).order("data", desc=True).execute()
     df = pd.DataFrame(res.data)
     if not df.empty:
@@ -164,4 +178,4 @@ else:
             st.plotly_chart(fig, use_container_width=True)
         st.dataframe(df[['data', 'nome_treino', 'distancia', 'tempo_min', 'fc_media', 'TRIMP']], use_container_width=True, hide_index=True)
     else:
-        st.warning("Nenhum treino encontrado. Conecte ao Strava na lateral!")
+        st.warning("Nenhum treino encontrado. Use o botão laranja na lateral para puxar seus dados do Strava!")
