@@ -1,114 +1,130 @@
 import streamlit as st
-import base64
-from datetime import datetime
+import pandas as pd
+import plotly.express as px
+from datetime import datetime, date
+import hashlib, urllib.parse, requests
+from supabase import create_client
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Dashboard Strava v6.4", layout="wide")
+# ==========================================
+# VERSÃO: v6.3 (LOGIN ESTÁVEL + LGPD + RODAPÉ)
+# ==========================================
 
-# --- 1. FUNÇÃO DE CONVERSÃO BASE64 (Blindagem de Imagem) ---
-def get_base64(file_path):
-    try:
-        with open(file_path, "rb") as f:
-            data = f.read()
-        return base64.b64encode(data).decode()
-    except FileNotFoundError:
-        # Placeholder caso a imagem não exista para não quebrar o código
-        return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+st.set_page_config(page_title="Fábio Assessoria v6.3", layout="wide", page_icon="🏃‍♂️")
 
-# Carregar logo (substitua pelo seu arquivo)
-logo_base64 = get_base64("logo_strava.png")
+# --- CONEXÕES ---
+try:
+    supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+    CLIENT_ID = st.secrets["STRAVA_CLIENT_ID"]
+    CLIENT_SECRET = st.secrets["STRAVA_CLIENT_SECRET"]
+except Exception as e:
+    st.error("Erro nas Secrets.")
+    st.stop()
 
-# --- 2. TRAVA DE SESSÃO E SEGURANÇA ---
-if 'autenticado' not in st.session_state:
-    st.session_state.autenticado = False
-if 'user_name' not in st.session_state:
-    st.session_state.user_name = ""
+REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
+pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
 
-# --- 3. INJEÇÃO DE CSS (Layout Estável) ---
-st.markdown(f"""
-    <style>
-    /* Fixar Rodapé e evitar 'balanço' */
-    .footer {{
-        position: fixed;
-        left: 0;
-        bottom: 0;
-        width: 100%;
-        background-color: white;
-        color: #FC4C02; /* Laranja Strava */
-        text-align: center;
-        padding: 10px;
-        border-top: 1px solid #eee;
-        z-index: 1000;
-    }}
-    
-    /* Estilização do Container LGPD */
-    .lgpd-container {{
-        background-color: #f9f9f9;
-        padding: 20px;
-        border-left: 5px solid #FC4C02;
-        border-radius: 5px;
-        margin: 10px 0;
-    }}
+# --- FUNÇÕES ---
+def hash_senha(senha): return hashlib.sha256(str.encode(senha)).hexdigest()
 
-    /* Blindagem do botão Admin */
-    .stButton>button {{
-        border-radius: 20px;
-        font-weight: bold;
-    }}
-    </style>
-    """, unsafe_allow_html=True)
+def formatar_data_br(data_str):
+    if not data_str or str(data_str) == "None": return "Pendente"
+    try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
+    except: return str(data_str)
 
-# --- 4. LÓGICA DE INTERFACE ---
+# --- SISTEMA DE LOGIN PERSISTENTE ---
+if "logado" not in st.session_state:
+    st.session_state.logado = False
 
-# Sidebar com área de Admin
+# Captura retorno do Strava
+params = st.query_params
+if "code" in params and "user_mail" in params:
+    u = supabase.table("usuarios_app").select("*").eq("email", params["user_mail"]).execute()
+    if u.data:
+        st.session_state.logado = True
+        st.session_state.user_info = u.data[0]
+
+# --- TELA DE LOGIN / CADASTRO ---
+if not st.session_state.logado:
+    st.markdown("<h2 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h2>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 1.5, 1])
+    with c2:
+        tab_login, tab_cadastro = st.tabs(["🔑 Entrar", "📝 Novo Aluno"])
+        with tab_login:
+            with st.form("login_form"):
+                e, s = st.text_input("E-mail"), st.text_input("Senha", type="password")
+                if st.form_submit_button("Acessar Painel", use_container_width=True):
+                    u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
+                    if u.data:
+                        st.session_state.logado = True
+                        st.session_state.user_info = u.data[0]
+                        st.rerun()
+                    else: st.error("E-mail ou senha incorretos.")
+        
+        with tab_cadastro:
+            with st.form("cad_form"):
+                n_nome = st.text_input("Nome Completo")
+                n_email = st.text_input("E-mail")
+                n_senha = st.text_input("Crie uma Senha", type="password")
+                # RECURSO LGPD RESTAURADO
+                aceite = st.checkbox("Li e aceito os Termos de Uso e a Política de Privacidade (LGPD). Autorizo o uso dos meus dados de treino para análise de performance.")
+                with st.expander("📄 Ver Termos de Uso e LGPD"):
+                    st.write("Dados coletados exclusivamente para consultoria esportiva por Fábio Hanada. Seus dados do Strava serão usados apenas para métricas de performance.")
+                if st.form_submit_button("Cadastrar", use_container_width=True):
+                    if not aceite: st.error("Você precisa aceitar os termos.")
+                    elif n_nome and n_email and n_senha:
+                        try:
+                            supabase.table("usuarios_app").insert({"nome": n_nome, "email": n_email, "senha": hash_senha(n_senha), "status_pagamento": False}).execute()
+                            st.success("Cadastrado! Peça liberação ao Fábio.")
+                        except: st.error("E-mail já cadastrado.")
+    st.stop()
+
+user = st.session_state.user_info
+eh_admin = user.get('is_admin', False)
+
+# --- SIDEBAR ---
 with st.sidebar:
-    st.title("⚙️ Painel de Controle")
-    if not st.session_state.autenticado:
-        user = st.text_input("Usuário")
-        senha = st.text_input("Senha", type="password")
-        if st.button("Acessar Admin"):
-            if user == "admin" and senha == "1234": # Exemplo simples
-                st.session_state.autenticado = True
-                st.success("Logado!")
-                st.rerun()
-            else:
-                st.error("Credenciais inválidas")
-    else:
-        st.write(f"Conectado como: **Admin**")
-        if st.button("Sair"):
-            st.session_state.autenticado = False
-            st.rerun()
+    st.markdown(f"### 👤 {user['nome']}")
+    if not eh_admin:
+        link_strava = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={urllib.parse.quote(REDIRECT_URI + '?user_mail=' + user['email'])}&scope=activity:read_all&approval_prompt=auto"
+        st.markdown(f'''<a href="{link_strava}" target="_self" style="text-decoration: none;"><div style="background-color: #FC4C02; color: white; padding: 12px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 20px;">Connect with STRAVA</div></a>''', unsafe_allow_html=True)
+    if st.button("🚪 Sair", use_container_width=True):
+        st.session_state.logado = False
+        st.rerun()
 
-# Corpo Principal
-st.header("🚀 Performance Strava - v6.4")
-
-# Container LGPD
-st.markdown('<div class="lgpd-container">', unsafe_allow_html=True)
-st.subheader("Privacidade e Termos (LGPD)")
-aceitou = st.checkbox("Declaro que autorizo o processamento dos meus dados de atividade física para fins de análise de performance.")
-st.markdown('</div>', unsafe_allow_html=True)
-
-if aceitou:
-    st.info("✅ Termos aceitos. Carregando dados da API...")
-    
-    # Simulação de Dashboard
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Distância Total", "120 km", "+5%")
-    col2.metric("Elevação", "1.250 m", "10%")
-    col3.metric("Tempo Ativo", "10h 15m", "-2%")
-    
-    # Espaço para os gráficos
-    st.area_chart([10, 25, 20, 40, 35, 50])
-    
+# --- TELAS ---
+if eh_admin:
+    st.title("👨‍🏫 Central do Treinador")
+    alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
+    for aluno in alunos.data:
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([2, 1.5, 1.5])
+            with c1: st.write(f"**{aluno['nome']}**\n\nStatus: {'✅ Ativo' if aluno['status_pagamento'] else '❌ Bloqueado'}")
+            with c2: nova_dt = st.date_input("Vencimento", value=date.today(), key=f"d_{aluno['id']}")
+            with c3:
+                if st.button("💾 Salvar", key=f"s_{aluno['id']}", use_container_width=True):
+                    supabase.table("usuarios_app").update({"data_vencimento": str(nova_dt), "status_pagamento": True}).eq("id", aluno['id']).execute()
+                    st.rerun()
+                if st.button("Bloquear", key=f"b_{aluno['id']}", use_container_width=True):
+                    supabase.table("usuarios_app").update({"status_pagamento": False}).eq("id", aluno['id']).execute()
+                    st.rerun()
 else:
-    st.warning("⚠️ Aguardando aceite dos termos para exibir métricas.")
+    st.title(f"🚀 Dashboard: {user['nome']}")
+    if not user.get('status_pagamento'):
+        st.error("⚠️ Acesso pendente de renovação.")
+        with st.expander("💳 Dados para Pagamento PIX", expanded=True):
+            st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(pix_copia_e_cola)}")
+            st.code(pix_copia_e_cola)
+        st.stop()
+    
+    # Gráficos e Histórico restaurados
+    res = supabase.table("treinos_alunos").select("*").eq("aluno_id", user['id']).order("data", desc=True).execute()
+    df = pd.DataFrame(res.data)
+    if not df.empty:
+        c1, c2 = st.columns(2)
+        with c1: st.plotly_chart(px.bar(df, x='data', y='distancia', title="Distância", color_discrete_sequence=['#FC4C02']), use_container_width=True)
+        with c2: st.plotly_chart(px.line(df, x='data', y='fc_media', title="FC Média"), use_container_width=True)
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
-# --- 5. RODAPÉ BLINDADO (HTML + Base64) ---
-st.markdown(f"""
-    <div class="footer">
-        <img src="data:image/png;base64,{logo_base64}" width="120" style="vertical-align: middle; margin-right: 10px;">
-        <span style="font-family: sans-serif; font-weight: bold;">
-            Powered by Strava | Atualizado em: {datetime.now().strftime('%d/%m/%Y')}
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
+# --- RODAPÉ STRAVA (MÉTODO RECOMENDADO) ---
+st.markdown("---")
+st.image("https://strava.github.io/api/images/api_logo_pwrdBy_strava_horiz_light.png", width=160)
