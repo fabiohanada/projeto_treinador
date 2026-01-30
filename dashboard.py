@@ -7,10 +7,10 @@ from supabase import create_client
 from twilio.rest import Client 
 
 # ==========================================
-# VERSÃO: v6.0 (RESTAURAÇÃO TOTAL DO LAYOUT)
+# VERSÃO: v6.1 (LAYOUT BLINDADO + STRAVA FIX)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v6.0", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v6.1", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES ---
 try:
@@ -122,7 +122,6 @@ if eh_admin:
     res_alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
     if res_alertas.data:
         for a in res_alertas.data: st.error(f"🚨 {a['mensagem']}")
-    
     st.divider()
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     for aluno in alunos.data:
@@ -162,15 +161,10 @@ else:
         with c2: st.plotly_chart(px.line(df, x='data', y='fc_media', title="FC Média", markers=True), use_container_width=True)
         st.dataframe(df[['data', 'nome_treino', 'distancia', 'tempo_min', 'fc_media', 'TRIMP']], use_container_width=True, hide_index=True)
 
-# --- RODAPÉ STRAVA (ESTILO GARANTIDO) ---
+# --- RODAPÉ STRAVA OFICIAL (FIXED) ---
 st.markdown("<br><br><br>", unsafe_allow_html=True)
 st.divider()
-st.markdown(
-    """
-    <div style="display: flex; justify-content: flex-end; align-items: center;">
-        <span style="color: gray; font-size: 12px; margin-right: 10px;">Powered by</span>
-        <img src="https://strava.github.io/api/images/api_logo_pwrdBy_strava_horiz_light.png" width="120">
-    </div>
-    """, 
-    unsafe_allow_html=True
-)
+col_f1, col_f2 = st.columns([7, 3])
+with col_f2:
+    # Este é o link oficial que o Strava exige para aprovação
+    st.image("https://raw.githubusercontent.com/stravaws/strava-api-brand-kit/master/powered_by_strava_light.png", width=200)
