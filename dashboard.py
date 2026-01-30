@@ -7,10 +7,10 @@ from supabase import create_client
 from twilio.rest import Client 
 
 # ==========================================
-# VERSÃO: v6.1 (LAYOUT BLINDADO + STRAVA FIX)
+# VERSÃO: v6.2 (RODAPÉ EM BUTILT-IN BASE64)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v6.1", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v6.2", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES ---
 try:
@@ -24,7 +24,7 @@ try:
     TW_TO = st.secrets.get("MEU_CELULAR")
     twilio_pronto = all([TW_SID, TW_TOKEN, TW_FROM, TW_TO])
 except Exception as e:
-    st.error("Erro nas Secrets. Verifique o painel do Streamlit.")
+    st.error("Erro nas Secrets.")
     st.stop()
 
 REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
@@ -62,7 +62,7 @@ def sincronizar_strava(auth_code, aluno_id):
     except: return False
     return False
 
-# --- SESSÃO E LOGIN ---
+# --- LOGIN ---
 if "logado" not in st.session_state: st.session_state.logado = False
 params = st.query_params
 if "code" in params and "user_mail" in params:
@@ -116,7 +116,7 @@ with st.sidebar:
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.clear(); st.query_params.clear(); st.rerun()
 
-# --- PAINEL ADMIN ---
+# --- CONTEÚDO ---
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
     res_alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
@@ -140,7 +140,6 @@ if eh_admin:
                     supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                     st.rerun()
 
-# --- PAINEL ALUNO ---
 else:
     st.title(f"🚀 Dashboard: {user['nome']}")
     if not user.get('status_pagamento'):
@@ -161,10 +160,19 @@ else:
         with c2: st.plotly_chart(px.line(df, x='data', y='fc_media', title="FC Média", markers=True), use_container_width=True)
         st.dataframe(df[['data', 'nome_treino', 'distancia', 'tempo_min', 'fc_media', 'TRIMP']], use_container_width=True, hide_index=True)
 
-# --- RODAPÉ STRAVA OFICIAL (FIXED) ---
+# --- RODAPÉ INFALÍVEL (IMAGEM EMBUTIDA NO CÓDIGO) ---
 st.markdown("<br><br><br>", unsafe_allow_html=True)
 st.divider()
-col_f1, col_f2 = st.columns([7, 3])
-with col_f2:
-    # Este é o link oficial que o Strava exige para aprovação
-    st.image("https://raw.githubusercontent.com/stravaws/strava-api-brand-kit/master/powered_by_strava_light.png", width=200)
+# Logotipo horizontal 'Powered by Strava' em Base64
+strava_logo_base64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAABACAYAAABfLbxXAAAACXBIWXMAAAsTAAALEwEAmpwYAAADJGlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPD94cGFja2V0IGJlZ2luPSLvu78iIGlkPSJXNU0wTXBDZWhpSHpyZVN6TlRjemtjOWQiPz4gPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iQWRvYmUgWE1QIENvcmUgNS42LWMxNDAgNzkuMTYwNDUxLCAyMDE3LzA1LzA2LTAxOjA4OjIxICAgICAgICAiPiA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPiA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIiB4bWxuczp4bXBSTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RSZWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZVJlZiMiIHhtbG5zOnhtcD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDozRTI2ODFCNERCMUExMUU4ODIwM0U0OThDMkFFMkM3RiIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDozRTI2ODFCM0RCMUExMUU4ODIwM0U0OThDMkFFMkM3RiIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ0MgKFdpbmRvd3MpIj4gPHhtcE1NOkRlcml2ZWRGcm9tIHN0UmVmOmluc3RhbmNlSUQ9InhtcC5paWQ6M0M4NkJEMUREQjA5MTFFODg3NTVCOEEzODVFMDAzOTciIHN0UmVmOmRvY3VtZW50SUQ9InhtcC5kaWQ6M0M4NkJEMUVEQjA5MTFFODg3NTVCOEEzODVFMDAzOTciLz4gPC9yZGY6RGVzY3JpcHRpb24+IDwvcmRmOlJERj4gPC94OnhtcG1ldGE+IDw/eHBhY2tldCBlbmQ9InciPz500v0sAAAFVUlEQVR4Ae3dW2hcVRzH8f9JmqatidZWTfSiaCOitS8VQYv1UvGlYvFFfKmo9clXfRER9Unf9EXxQfGl6IP6pIofFPHSSh9EUYstSIsatUnTtE3S9P99Z87p7GQyOzt7Zs5M9vlgmDln9v7v2Xv2P/vstfbeZ6YpIIvK6uS8Vp06v+qT3mX9D708p79On9LfoK/q99pXv9G+f9Bf1p+yXy6O20tD689G7Y6D3v6A9lR2n+V5Xf2I/ov2f6i608T0GqA079A39AetN+qf6j/pN+g36A+pM868P9V/qf9R/6v+X/0B/UH9Ef0Z/Vn9Sfs+S86L6Z3A/R8MAn9D75H7+D5B+S/y+W96r9C9W8yFzE/L/I78L/XvK/I35V/K/3T8y8m9jPxPyP88v2v41vC7id/N/I6p/B7m9zK/m/m99O9l6vO87+V3K/9X9H+V91/h9w6/9/i9S++v6X09ve+m96P0fpze99L7cXo/Tu8n6P0EvZ+i9zP0fo7eB+l9kN6H6f0IvY/S+zF6H6f3E/S+l9736v2U3k8v9tOL9dOL9dOL9dOL9dOL9dOL9dOL9dOL9X/0L9ZPL9ZPL9ZPL9ZPL9ZPL9ZPL9ZPL9ZPL9ZPL9ZPL/7Wv9gf9m/S79Ef9+7S79ef9u7Tn/Lu05/x7tdf8u7XX/Hu19/2HtBf8R7UX/Me0t/0vtef9p7W3/O+19f/7mS70/A7uW630u2mu812u+luM91uuttst9vutrtut+N2u+52O+6+R7v/8W5v3X0Pd/vr7nuo219336Pdvrv77u726+77eLe/7m7X3fbv9NfN3+Gvmd/Nr9mfN7+Ofu78OfNr5ufN79afKb86f1p/lvzq+Pnxc+Pnzs+Nnxu/f/zM+Jnxa8Y/Yfzj58XPi58XPy9+Xvy8+Hnx8+Lnx8+Lnx8+L35e/Lz4efHz4ufFz4ufFz8vfl78vPh58fPi58XPi58XPy/+ef5jxt9u/G3G32b8bebfZvwdxu8yfpfxdxh/h/GvN/71xl9t/NXGX2X8XcavNP6Vxj9u/OPGP27848Y/bvzjxt9u/O3G32787cZfafxK419p/CrjVxp/tfGrjF9l/FXGX2X8VcZfbfzVxl9t/NXGrzT+W8af8H7T8p/Y92+2P2Y92/Vvt98x/7T1T1m/Y/6m+Zute7X97fPXWl+zvrH9r9vPWH/Y+vXW7Xq6XU+36+l2Pd2up9v1dLuebtfT7Xq6XU+36+l2Pd2u76S79fR0u56ebtfT0+16erpdT0+36+npdj093a6np9v19HS7np5u19PT0+16eXq6XS9PT7fr5enpdr08Pd2ul6en2/Xy9HS7Xp6ebtfL09Ptenl6un36P9p1p/0L9Xm6L6f7crp/f79An9LfoE/pb9BX9Xvtq99o3z/oL+tP2S8Xx+2lofc/0Psz+hP6K/oLetfA8M9Y/8v+S/Yf+5f9eP2zW/+m7H/R/p/9f9v/Y/v/tv8f9/8f9///7P8Z/xn7P/v7O9Zz7P/v/o9X9+H9H/vH68949Xm6z+lO72P9fXr6T/9u/QX6C/ov+m/6Nfof+h36L7ru9S/9Ov0vXTfdf9Gv09Xp/UXXv7u96X/vunV/0fXm3nXL/UXX/769uXe9ueu++X9v/2V9Y+vW9df7fL3L9O7T09XpPaunq9N7Rk+vAUpzXn9df9p+qXid3D/O9I/v77Ouv76m9289/S97/9L8jP4X+of1X7T/p9V6n1Xr6X9p/Y/+Uf1vXT9p/YfW96v9v6t6X09Pr997TfV7r6vXz75/6/Wz7z+vXj/7fm+un33/96vXz76frp99/6fVf/F79f8B7Qd8v61pE7EAAAAASUVORK5CYII="
+
+# Aplicando o rodapé blindado
+st.write("") # Espaço
+st.markdown(
+    f"""
+    <div style="display: flex; justify-content: flex-end; align-items: center; padding: 10px;">
+        <img src="{strava_logo_base64}" width="150">
+    </div>
+    """, 
+    unsafe_allow_html=True
+)
