@@ -4,41 +4,75 @@ import plotly.express as px
 from datetime import datetime, date
 import hashlib, urllib.parse, requests
 from supabase import create_client
+from twilio.rest import Client 
 
 # ==========================================
-# VERSÃO: v5.0 (FIX REDIRECIONAMENTO STRAVA)
+# VERSÃO: v5.2 (NOTIFICAÇÃO VIA WHATSAPP TWILIO)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v5.0", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v5.2", layout="wide", page_icon="🏃‍♂️")
 
-# --- CONEXÕES ---
+# --- CONEXÕES SEGURAS ---
 try:
     supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
     CLIENT_ID = st.secrets["STRAVA_CLIENT_ID"]
     CLIENT_SECRET = st.secrets["STRAVA_CLIENT_SECRET"]
+    
+    # CREDENCIAIS TWILIO
+    TWILIO_SID = st.secrets["TWILIO_ACCOUNT_SID"]
+    TWILIO_TOKEN = st.secrets["TWILIO_AUTH_TOKEN"]
+    TWILIO_FROM = st.secrets["TWILIO_PHONE_NUMBER"] # Ex: +14155238886
+    TWILIO_TO = st.secrets["MEU_CELULAR"]         # Teu número com +55...
 except Exception as e:
-    st.error("Erro nas Secrets.")
+    st.error("Erro nas Secrets. Verifique as chaves do Twilio e Supabase.")
     st.stop()
 
-# URL dinâmica para funcionar tanto local quanto no Cloud
 REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
 chave_pix_visivel = "fabioh1979@hotmail.com"
 pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com52040000530398654040.015802BR5912Fabio Hanada6009SAO PAULO62140510cfnrrCpgWv63043E37" 
 
+# --- FUNÇÃO DISPARO WHATSAPP ---
+def enviar_whatsapp_notificacao(aluno_nome):
+    try:
+        client = Client(TWILIO_SID, TWILIO_TOKEN)
+        # No WhatsApp do Twilio, é obrigatório o prefixo 'whatsapp:'
+        msg_corpo = f"Fábio, novo pagamento detectado de {aluno_nome.upper()}. Confira no seu banco!"
+        
+        client.messages.create(
+            from_=f"whatsapp:{TWILIO_FROM}",
+            to=f"whatsapp:{TWILIO_TO}",
+            body=msg_corpo
+        )
+    except Exception as e:
+        # Silencioso para não travar o app do aluno
+        pass
+
+# --- FUNÇÃO DE ALERTA NO PAINEL ---
+def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
+    try:
+        # Verifica se já existe alerta pendente para não repetir SMS/WhatsApp
+        check = supabase.table("alertas_admin").select("*").eq("email_aluno", aluno_email).eq("lida", False).execute()
+        
+        if not check.data:
+            msg = f"Novo pagamento detectado {aluno_nome_completo.upper()}, por favor conferir na sua conta bancaria."
+            supabase.table("alertas_admin").insert({
+                "email_aluno": aluno_email, 
+                "mensagem": msg, 
+                "lida": False
+            }).execute()
+            
+            # DISPARA O WHATSAPP
+            enviar_whatsapp_notificacao(aluno_nome_completo)
+    except: 
+        pass
+
+# --- RESTANTE DAS FUNÇÕES (IGUAL V5.0/V5.1) ---
 def hash_senha(senha): return hashlib.sha256(str.encode(senha)).hexdigest()
 
 def formatar_data_br(data_str):
     if not data_str or str(data_str) == "None": return "Pendente"
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
-
-def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
-    try:
-        check = supabase.table("alertas_admin").select("*").eq("email_aluno", aluno_email).eq("lida", False).execute()
-        if not check.data:
-            msg = f"Novo pagamento detectado {aluno_nome_completo.upper()}, por favor conferir na sua conta bancaria."
-            supabase.table("alertas_admin").insert({"email_aluno": aluno_email, "mensagem": msg, "lida": False}).execute()
-    except: pass
 
 def sincronizar_strava(auth_code, aluno_id):
     token_url = "https://www.strava.com/oauth/token"
@@ -62,24 +96,18 @@ def sincronizar_strava(auth_code, aluno_id):
     except: return False
     return False
 
-# --- LÓGICA DE SESSÃO PERSISTENTE ---
-if "logado" not in st.session_state: 
-    st.session_state.logado = False
-
-# 1. Verifica se está voltando do Strava (tem 'code' na URL)
+# --- CONTROLE DE SESSÃO ---
+if "logado" not in st.session_state: st.session_state.logado = False
 params = st.query_params
 if "code" in params and "user_mail" in params:
-    # Se tem o e-mail na URL, reconecta automaticamente
     u = supabase.table("usuarios_app").select("*").eq("email", params["user_mail"]).execute()
     if u.data:
-        st.session_state.logado = True
-        st.session_state.user_info = u.data[0]
-        # Sincroniza e limpa o código da URL para não repetir
+        st.session_state.logado, st.session_state.user_info = True, u.data[0]
         sincronizar_strava(params["code"], u.data[0]['id'])
         st.query_params.clear()
-        st.query_params["user_mail"] = u.data[0]['email'] # Mantém o rastro do login
+        st.query_params["user_mail"] = u.data[0]['email']
 
-# 2. Login manual
+# --- LOGIN ---
 if not st.session_state.logado:
     st.markdown("<h2 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h2>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
@@ -89,9 +117,8 @@ if not st.session_state.logado:
             if st.form_submit_button("Acessar Painel", use_container_width=True):
                 u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
                 if u.data:
-                    st.session_state.logado = True
-                    st.session_state.user_info = u.data[0]
-                    st.query_params["user_mail"] = e # Salva na URL para o Strava saber quem é na volta
+                    st.session_state.logado, st.session_state.user_info = True, u.data[0]
+                    st.query_params["user_mail"] = e
                     st.rerun()
                 else: st.error("Dados incorretos.")
     st.stop()
@@ -103,16 +130,11 @@ eh_admin = user.get('is_admin', False)
 with st.sidebar:
     st.markdown(f"### 👤 {user['nome']}")
     if not eh_admin:
-        # Adicionamos o e-mail do usuário na volta do Strava para o app saber quem logar
         redirect_com_email = f"{REDIRECT_URI}?user_mail={user['email']}"
         link_strava = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={urllib.parse.quote(redirect_com_email)}&scope=activity:read_all&approval_prompt=auto"
-        
         st.markdown(f'''<a href="{link_strava}" target="_self" style="text-decoration: none;"><div style="background-color: #FC4C02; color: white; padding: 12px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 20px;">🟠 ATUALIZAR TREINOS (STRAVA)</div></a>''', unsafe_allow_html=True)
-    
     if st.button("🚪 Sair", use_container_width=True):
-        st.session_state.clear()
-        st.query_params.clear()
-        st.rerun()
+        st.session_state.clear(); st.query_params.clear(); st.rerun()
 
 # --- PAINEL ADMIN ---
 if eh_admin:
@@ -165,7 +187,6 @@ else:
         st.stop()
     
     st.info(f"📅 Plano ativo até: **{formatar_data_br(user.get('data_vencimento'))}**")
-    
     res = supabase.table("treinos_alunos").select("*").eq("aluno_id", user['id']).order("data", desc=True).execute()
     df = pd.DataFrame(res.data)
     if not df.empty:
@@ -177,5 +198,4 @@ else:
             fig.add_hline(y=130, line_dash="dash", line_color="green")
             st.plotly_chart(fig, use_container_width=True)
         st.dataframe(df[['data', 'nome_treino', 'distancia', 'tempo_min', 'fc_media', 'TRIMP']], use_container_width=True, hide_index=True)
-    else:
-        st.warning("Nenhum treino encontrado. Use o botão laranja na lateral para puxar seus dados do Strava!")
+    else: st.warning("Nenhum treino encontrado. Use o botão laranja!")
