@@ -7,24 +7,27 @@ from supabase import create_client
 from twilio.rest import Client 
 
 # ==========================================
-# VERSÃO: v5.2 (NOTIFICAÇÃO VIA WHATSAPP TWILIO)
+# VERSÃO: v5.3 (CÓDIGO COMPLETO + TWILIO ROBUSTO)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v5.2", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v5.3", layout="wide", page_icon="🏃‍♂️")
 
-# --- CONEXÕES SEGURAS ---
+# --- CONEXÕES SEGURAS COM TRATAMENTO DE ERRO ---
 try:
+    # Essenciais (Se falhar, o app para)
     supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
     CLIENT_ID = st.secrets["STRAVA_CLIENT_ID"]
     CLIENT_SECRET = st.secrets["STRAVA_CLIENT_SECRET"]
     
-    # CREDENCIAIS TWILIO
-    TWILIO_SID = st.secrets["TWILIO_ACCOUNT_SID"]
-    TWILIO_TOKEN = st.secrets["TWILIO_AUTH_TOKEN"]
-    TWILIO_FROM = st.secrets["TWILIO_PHONE_NUMBER"] # Ex: +14155238886
-    TWILIO_TO = st.secrets["MEU_CELULAR"]         # Teu número com +55...
+    # Opcionais Twilio (Se falhar, o app continua sem WhatsApp)
+    TWILIO_SID = st.secrets.get("TWILIO_ACCOUNT_SID")
+    TWILIO_TOKEN = st.secrets.get("TWILIO_AUTH_TOKEN")
+    TWILIO_FROM = st.secrets.get("TWILIO_PHONE_NUMBER")
+    TWILIO_TO = st.secrets.get("MEU_CELULAR")
+    
+    twilio_pronto = all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, TWILIO_TO])
 except Exception as e:
-    st.error("Erro nas Secrets. Verifique as chaves do Twilio e Supabase.")
+    st.error("Erro crítico nas Secrets (Supabase ou Strava). Verifique o painel do Streamlit.")
     st.stop()
 
 REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
@@ -33,24 +36,23 @@ pix_copia_e_cola = "00020126440014BR.GOV.BCB.PIX0122fabioh1979@hotmail.com520400
 
 # --- FUNÇÃO DISPARO WHATSAPP ---
 def enviar_whatsapp_notificacao(aluno_nome):
+    if not twilio_pronto:
+        return # Sai da função se o Twilio não estiver configurado
     try:
         client = Client(TWILIO_SID, TWILIO_TOKEN)
-        # No WhatsApp do Twilio, é obrigatório o prefixo 'whatsapp:'
         msg_corpo = f"Fábio, novo pagamento detectado de {aluno_nome.upper()}. Confira no seu banco!"
-        
         client.messages.create(
             from_=f"whatsapp:{TWILIO_FROM}",
             to=f"whatsapp:{TWILIO_TO}",
             body=msg_corpo
         )
-    except Exception as e:
-        # Silencioso para não travar o app do aluno
+    except:
         pass
 
 # --- FUNÇÃO DE ALERTA NO PAINEL ---
 def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
     try:
-        # Verifica se já existe alerta pendente para não repetir SMS/WhatsApp
+        # Verifica se já existe alerta pendente
         check = supabase.table("alertas_admin").select("*").eq("email_aluno", aluno_email).eq("lida", False).execute()
         
         if not check.data:
@@ -61,12 +63,12 @@ def notificar_pagamento_admin(aluno_nome_completo, aluno_email):
                 "lida": False
             }).execute()
             
-            # DISPARA O WHATSAPP
+            # Tenta disparar o WhatsApp
             enviar_whatsapp_notificacao(aluno_nome_completo)
     except: 
         pass
 
-# --- RESTANTE DAS FUNÇÕES (IGUAL V5.0/V5.1) ---
+# --- FUNÇÕES AUXILIARES ---
 def hash_senha(senha): return hashlib.sha256(str.encode(senha)).hexdigest()
 
 def formatar_data_br(data_str):
@@ -107,20 +109,33 @@ if "code" in params and "user_mail" in params:
         st.query_params.clear()
         st.query_params["user_mail"] = u.data[0]['email']
 
-# --- LOGIN ---
+# --- TELA DE LOGIN ---
 if not st.session_state.logado:
     st.markdown("<h2 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h2>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
     with c2:
-        with st.form("login_form"):
-            e, s = st.text_input("E-mail"), st.text_input("Senha", type="password")
-            if st.form_submit_button("Acessar Painel", use_container_width=True):
-                u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
-                if u.data:
-                    st.session_state.logado, st.session_state.user_info = True, u.data[0]
-                    st.query_params["user_mail"] = e
-                    st.rerun()
-                else: st.error("Dados incorretos.")
+        tab_login, tab_cadastro = st.tabs(["🔑 Entrar", "📝 Novo Aluno"])
+        with tab_login:
+            with st.form("login_form"):
+                e, s = st.text_input("E-mail"), st.text_input("Senha", type="password")
+                if st.form_submit_button("Acessar Painel", use_container_width=True):
+                    u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
+                    if u.data:
+                        st.session_state.logado, st.session_state.user_info = True, u.data[0]
+                        st.query_params["user_mail"] = e
+                        st.rerun()
+                    else: st.error("Dados incorretos.")
+        with tab_cadastro:
+            with st.form("cad_form"):
+                n_nome = st.text_input("Nome Completo")
+                n_email = st.text_input("E-mail para acesso")
+                n_senha = st.text_input("Crie uma Senha", type="password")
+                if st.form_submit_button("Cadastrar", use_container_width=True):
+                    if n_nome and n_email and n_senha:
+                        dados_n = {"nome": n_nome, "email": n_email, "senha": hash_senha(n_senha), "status_pagamento": False}
+                        supabase.table("usuarios_app").insert(dados_n).execute()
+                        st.success("Cadastrado! Peça liberação ao Fábio.")
+                    else: st.warning("Preencha tudo.")
     st.stop()
 
 user = st.session_state.user_info
@@ -150,7 +165,7 @@ if eh_admin:
                 st.rerun()
         else: st.info("Nenhum pagamento novo pendente.")
         if st.button("🔄 Atualizar Lista"): st.rerun()
-    except: st.warning("Aguardando inicialização da tabela...")
+    except: st.warning("Erro ao carregar notificações.")
 
     st.divider()
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
