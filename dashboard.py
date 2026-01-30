@@ -7,10 +7,10 @@ from supabase import create_client
 from twilio.rest import Client 
 
 # ==========================================
-# VERSÃO: v5.9 (FINANCEIRO RESTAURADO + RODAPÉ FIX)
+# VERSÃO: v6.0 (RESTAURAÇÃO TOTAL DO LAYOUT)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v5.9", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v6.0", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES ---
 try:
@@ -24,7 +24,7 @@ try:
     TW_TO = st.secrets.get("MEU_CELULAR")
     twilio_pronto = all([TW_SID, TW_TOKEN, TW_FROM, TW_TO])
 except Exception as e:
-    st.error("Erro nas Secrets.")
+    st.error("Erro nas Secrets. Verifique o painel do Streamlit.")
     st.stop()
 
 REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
@@ -38,19 +38,11 @@ def formatar_data_br(data_str):
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
 
-def enviar_whatsapp(nome):
-    if not twilio_pronto: return
-    try:
-        client = Client(TW_SID, TW_TOKEN)
-        client.messages.create(from_=f"whatsapp:{TW_FROM}", to=f"whatsapp:{TW_TO}", body=f"Fábio, novo pagamento detectado de {nome.upper()}.")
-    except: pass
-
 def notificar_pagamento_admin(aluno_nome, aluno_email):
     try:
         check = supabase.table("alertas_admin").select("*").eq("email_aluno", aluno_email).eq("lida", False).execute()
         if not check.data:
             supabase.table("alertas_admin").insert({"email_aluno": aluno_email, "mensagem": f"Novo pagamento detectado {aluno_nome.upper()}, confira no banco.", "lida": False}).execute()
-            enviar_whatsapp(aluno_nome)
     except: pass
 
 def sincronizar_strava(auth_code, aluno_id):
@@ -101,15 +93,13 @@ if not st.session_state.logado:
                 n_nome = st.text_input("Nome Completo")
                 n_email = st.text_input("E-mail")
                 n_senha = st.text_input("Crie uma Senha", type="password")
-                aceite = st.checkbox("Li e aceito os Termos de Uso e a Política de Privacidade (LGPD). Autorizo o uso dos meus dados de treino para análise de performance.")
-                with st.expander("📄 Ver Termos de Uso"):
-                    st.write("Dados coletados exclusivamente para consultoria esportiva por Fábio Hanada.")
+                aceite = st.checkbox("Li e aceito os Termos de Uso e LGPD.")
                 if st.form_submit_button("Cadastrar", use_container_width=True):
                     if not aceite: st.error("Aceite os termos.")
                     elif n_nome and n_email and n_senha:
                         try:
                             supabase.table("usuarios_app").insert({"nome": n_nome, "email": n_email, "senha": hash_senha(n_senha), "status_pagamento": False}).execute()
-                            st.success("Cadastrado! Peça liberação.")
+                            st.success("Cadastro realizado!")
                         except: st.error("E-mail já existe.")
     st.stop()
 
@@ -129,26 +119,26 @@ with st.sidebar:
 # --- PAINEL ADMIN ---
 if eh_admin:
     st.title("👨‍🏫 Central do Treinador")
-    st.subheader("🔔 Notificações")
     res_alertas = supabase.table("alertas_admin").select("*").eq("lida", False).execute()
     if res_alertas.data:
         for a in res_alertas.data: st.error(f"🚨 {a['mensagem']}")
-        if st.button("Limpar Alertas"): 
-            supabase.table("alertas_admin").update({"lida": True}).eq("lida", False).execute()
-            st.rerun()
+    
     st.divider()
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     for aluno in alunos.data:
         with st.container(border=True):
-            c1, c2, c3 = st.columns([2, 2, 1])
-            with c1: st.write(f"**{aluno['nome']}**\n\nStatus: {'✅ Ativo' if aluno['status_pagamento'] else '❌ Bloqueado'}")
-            with c2: nova_dt = st.date_input("Vencimento", value=date.today(), key=f"d_{aluno['id']}")
+            c1, c2, c3 = st.columns([2, 1.5, 1.5])
+            with c1: st.markdown(f"**{aluno['nome']}**\n\nStatus: {'✅ Ativo' if aluno['status_pagamento'] else '❌ Bloqueado'}")
+            with c2:
+                venc_atual = datetime.strptime(str(aluno.get('data_vencimento', date.today())), '%Y-%m-%d').date() if aluno.get('data_vencimento') else date.today()
+                nova_dt = st.date_input("Vencimento", value=venc_atual, key=f"d_{aluno['id']}")
             with c3:
-                if st.button("Salvar", key=f"s_{aluno['id']}"):
+                if st.button("💾 Salvar", key=f"s_{aluno['id']}", use_container_width=True):
                     supabase.table("usuarios_app").update({"data_vencimento": str(nova_dt), "status_pagamento": True}).eq("id", aluno['id']).execute()
                     st.rerun()
-                if st.button("Bloquear", key=f"b_{aluno['id']}"):
-                    supabase.table("usuarios_app").update({"status_pagamento": False}).eq("id", aluno['id']).execute()
+                txt_btn = "🔒 Bloquear" if aluno['status_pagamento'] else "🔓 Liberar"
+                if st.button(txt_btn, key=f"b_{aluno['id']}", use_container_width=True):
+                    supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
                     st.rerun()
 
 # --- PAINEL ALUNO ---
@@ -157,7 +147,6 @@ else:
     if not user.get('status_pagamento'):
         notificar_pagamento_admin(user['nome'], user['email'])
         st.error("⚠️ Acesso pendente de renovação.")
-        # --- FINANCEIRO RESTAURADO AQUI ---
         with st.expander("💳 Dados para Pagamento PIX", expanded=True):
             st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(pix_copia_e_cola)}")
             st.code(pix_copia_e_cola)
@@ -169,18 +158,18 @@ else:
     if not df.empty:
         df['TRIMP'] = df['tempo_min'] * (df['fc_media'] / 100)
         c1, c2 = st.columns(2)
-        with c1: st.plotly_chart(px.bar(df, x='data', y='TRIMP', title="Carga de Treino (TRIMP)", color_discrete_sequence=['#FC4C02']), use_container_width=True)
-        with c2: st.plotly_chart(px.line(df, x='data', y='fc_media', title="FC Média"), use_container_width=True)
-        st.markdown("### 📋 Histórico")
+        with c1: st.plotly_chart(px.bar(df, x='data', y='TRIMP', title="Carga de Treino", color_discrete_sequence=['#FC4C02']), use_container_width=True)
+        with c2: st.plotly_chart(px.line(df, x='data', y='fc_media', title="FC Média", markers=True), use_container_width=True)
         st.dataframe(df[['data', 'nome_treino', 'distancia', 'tempo_min', 'fc_media', 'TRIMP']], use_container_width=True, hide_index=True)
-    else: st.warning("Conecte ao Strava!")
 
-# --- RODAPÉ FIXADO (DENTRO DE CONTAINER PARA FORÇAR EXIBIÇÃO) ---
-st.markdown("---")
+# --- RODAPÉ STRAVA (ESTILO GARANTIDO) ---
+st.markdown("<br><br><br>", unsafe_allow_html=True)
+st.divider()
 st.markdown(
     """
-    <div style="text-align: right;">
-        <img src="https://raw.githubusercontent.com/filipe-azevedo/strava-api-branding/main/api_logo_pwrdBy_strava_horiz_light.png" width="150">
+    <div style="display: flex; justify-content: flex-end; align-items: center;">
+        <span style="color: gray; font-size: 12px; margin-right: 10px;">Powered by</span>
+        <img src="https://strava.github.io/api/images/api_logo_pwrdBy_strava_horiz_light.png" width="120">
     </div>
     """, 
     unsafe_allow_html=True
