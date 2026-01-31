@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, date
-import hashlib, urllib.parse, requests
+import hashlib, urllib.parse, requests, base64
 from supabase import create_client
 from twilio.rest import Client 
 
 # ==========================================
-# VERSÃO: v5.6 (LAYOUT ORIGINAL PRESERVADO)
+# VERSÃO: v5.6 (LAYOUT ORIGINAL + RODAPÉ CORRIGIDO)
 # ==========================================
 
 st.set_page_config(page_title="Fábio Assessoria v5.6", layout="wide", page_icon="🏃‍♂️")
@@ -169,10 +169,26 @@ else:
         with c2: st.plotly_chart(px.line(df, x='data', y='fc_media', title="FC Média"), use_container_width=True)
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-# --- RODAPÉ FIXO (CORREÇÃO PARA STRAVA) ---
+# --- RODAPÉ BLINDADO (SOLUÇÃO TÉCNICA) ---
 st.markdown("---")
-st.markdown("""
-    <div style="text-align: right; padding: 10px;">
-        <img src="https://strava.github.io/api/images/api_logo_pwrdBy_strava_horiz_light.png" width="160">
+
+def get_strava_logo_html():
+    # Esta função faz o Python baixar a imagem e converter para texto
+    # O navegador recebe a imagem pronta, sem precisar acessar link externo
+    url = "https://strava.github.io/api/images/api_logo_pwrdBy_strava_horiz_light.png"
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            encoded = base64.b64encode(response.content).decode()
+            return f'<img src="data:image/png;base64,{encoded}" width="160">'
+    except:
+        pass
+    return "Powered by Strava" # Fallback simples
+
+logo_html = get_strava_logo_html()
+
+st.markdown(f"""
+    <div style="width: 100%; display: flex; justify-content: flex-end; padding-right: 10px;">
+        {logo_html}
     </div>
     """, unsafe_allow_html=True)
