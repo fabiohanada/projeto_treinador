@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v5.9 (BOTÃO DINÂMICO ATIVAR/BLOQUEAR)
+# VERSÃO: v6.0 (RESTAURO LGPD + ADMIN DINÂMICO)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v5.9", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v6.0", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES ---
 try:
@@ -17,7 +17,7 @@ try:
     CLIENT_ID = st.secrets["STRAVA_CLIENT_ID"]
     CLIENT_SECRET = st.secrets["STRAVA_CLIENT_SECRET"]
 except Exception as e:
-    st.error("Erro nas Secrets.")
+    st.error("Erro nas Secrets. Verifique o painel do Streamlit.")
     st.stop()
 
 REDIRECT_URI = "https://seu-treino-app.streamlit.app/" 
@@ -46,8 +46,6 @@ st.markdown("""
         border-top: 1px solid #eee;
         z-index: 999;
     }
-    /* Estilo para destacar os cards de alunos */
-    div[data-testid="stExpander"] { border: 1px solid #ddd; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -59,6 +57,7 @@ if not st.session_state.logado:
     c1, c2, c3 = st.columns([1, 1.5, 1])
     with c2:
         tab_login, tab_cadastro = st.tabs(["🔑 Entrar", "📝 Novo Aluno"])
+        
         with tab_login:
             with st.form("login_form"):
                 e, s = st.text_input("E-mail"), st.text_input("Senha", type="password")
@@ -68,20 +67,35 @@ if not st.session_state.logado:
                         st.session_state.logado, st.session_state.user_info = True, u.data[0]
                         st.rerun()
                     else: st.error("E-mail ou senha incorretos.")
+        
         with tab_cadastro:
             with st.form("cad_form"):
                 n_nome = st.text_input("Nome Completo")
                 n_email = st.text_input("E-mail")
                 n_telefone = st.text_input("Telefone")
                 n_senha = st.text_input("Crie uma Senha", type="password")
-                aceite = st.checkbox("Li e aceito os Termos de Uso e LGPD.")
+                
+                # --- LGPD RESTAURADA ---
+                aceite = st.checkbox("Li e aceito os Termos de Uso e a Política de Privacidade (LGPD).")
+                with st.expander("📄 Ver Termos de Uso e LGPD"):
+                    st.write("Seus dados de treino serão coletados e processados exclusivamente para fins de consultoria esportiva por Fábio Hanada. O acesso aos dados do Strava é restrito à análise de performance.")
+                
                 if st.form_submit_button("Cadastrar", use_container_width=True):
-                    if not aceite: st.error("Aceite os termos.")
+                    if not aceite: 
+                        st.error("⚠️ Você precisa aceitar os termos da LGPD para continuar.")
                     elif n_nome and n_email and n_senha:
                         try:
-                            supabase.table("usuarios_app").insert({"nome": n_nome, "email": n_email, "telefone": n_telefone, "senha": hash_senha(n_senha), "status_pagamento": False}).execute()
-                            st.success("Cadastrado! Peça liberação ao Fábio.")
-                        except: st.error("Erro no cadastro.")
+                            supabase.table("usuarios_app").insert({
+                                "nome": n_nome, 
+                                "email": n_email, 
+                                "telefone": n_telefone, 
+                                "senha": hash_senha(n_senha), 
+                                "status_pagamento": False
+                            }).execute()
+                            st.success("✅ Cadastrado com sucesso! Peça liberação ao Fábio.")
+                        except: st.error("Erro: Este e-mail já pode estar cadastrado.")
+                    else:
+                        st.warning("Preencha todos os campos obrigatórios.")
     st.stop()
 
 user = st.session_state.user_info
@@ -91,7 +105,7 @@ eh_admin = user.get('is_admin', False)
 with st.sidebar:
     st.markdown(f"### 👤 {user['nome']}")
     if not eh_admin:
-        link_strava = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={urllib.parse.quote(REDIRECT_URI + '?user_mail=' + user['email'])}&scope=activity:read_all&approval_prompt=auto"
+        link_strava = f"https://www.strava.com/oauth/authorize?client_id={CLIENT_ID}&...approval_prompt=auto"
         st.markdown(f'''<a href="{link_strava}" target="_self" style="text-decoration: none;"><div style="background-color: #FC4C02; color: white; padding: 12px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 20px;">Connect with STRAVA</div></a>''', unsafe_allow_html=True)
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.clear(); st.rerun()
@@ -106,24 +120,19 @@ if eh_admin:
     for aluno in alunos.data:
         with st.container(border=True):
             col_info, col_venc, col_btns = st.columns([2, 2, 1.5])
-            
             with col_info:
                 st.subheader(aluno['nome'])
                 st.caption(f"📧 {aluno['email']}")
                 st.write(f"Status: {'✅ ATIVO' if aluno['status_pagamento'] else '❌ BLOQUEADO'}")
-            
             with col_venc:
                 v_data = date.fromisoformat(aluno['data_vencimento']) if aluno.get('data_vencimento') else date.today()
                 nova_dt = st.date_input("Vencimento", value=v_data, key=f"d_{aluno['id']}")
-            
             with col_btns:
-                st.write("") # Espaçador
-                # Botão Salvar (Atualiza data e garante que fica ativo)
+                st.write("") 
                 if st.button("💾 Salvar Data", key=f"s_{aluno['id']}", use_container_width=True):
                     supabase.table("usuarios_app").update({"data_vencimento": str(nova_dt), "status_pagamento": True}).eq("id", aluno['id']).execute()
                     st.rerun()
-                
-                # BOTÃO DINÂMICO: Ativar ou Bloquear
+                # Botão Dinâmico Ativar/Bloquear
                 if aluno['status_pagamento']:
                     if st.button("🚫 Bloquear", key=f"b_{aluno['id']}", use_container_width=True):
                         supabase.table("usuarios_app").update({"status_pagamento": False}).eq("id", aluno['id']).execute()
@@ -132,9 +141,8 @@ if eh_admin:
                     if st.button("✅ Ativar", key=f"a_{aluno['id']}", use_container_width=True):
                         supabase.table("usuarios_app").update({"status_pagamento": True}).eq("id", aluno['id']).execute()
                         st.rerun()
-
 else:
-    # --- DASHBOARD ALUNO (MANTIDO) ---
+    # Dashboard Aluno (Layout Original)
     st.title(f"🚀 Dashboard: {user['nome']}")
     if not user.get('status_pagamento'):
         st.error("⚠️ Acesso pendente de renovação.")
