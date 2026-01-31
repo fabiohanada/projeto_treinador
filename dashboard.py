@@ -6,10 +6,10 @@ import hashlib, urllib.parse, requests
 from supabase import create_client
 
 # ==========================================
-# VERSÃO: v5.8 (ADMIN IDENTICO AO PRINT + RODAPÉ FIXO)
+# VERSÃO: v5.9 (BOTÃO DINÂMICO ATIVAR/BLOQUEAR)
 # ==========================================
 
-st.set_page_config(page_title="Fábio Assessoria v5.8", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Fábio Assessoria v5.9", layout="wide", page_icon="🏃‍♂️")
 
 # --- CONEXÕES ---
 try:
@@ -34,13 +34,7 @@ def formatar_data_br(data_str):
 # --- CSS DE ESTILIZAÇÃO ---
 st.markdown("""
     <style>
-    /* Ajuste para o rodapé não sobrepor conteúdo */
     .main .block-container { padding-bottom: 100px; }
-    
-    /* Estilo dos botões de Admin */
-    .stButton>button { border-radius: 8px; }
-    
-    /* Rodapé fixo */
     .footer-strava {
         position: fixed;
         bottom: 0;
@@ -52,6 +46,8 @@ st.markdown("""
         border-top: 1px solid #eee;
         z-index: 999;
     }
+    /* Estilo para destacar os cards de alunos */
+    div[data-testid="stExpander"] { border: 1px solid #ddd; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -114,24 +110,31 @@ if eh_admin:
             with col_info:
                 st.subheader(aluno['nome'])
                 st.caption(f"📧 {aluno['email']}")
-                st.write(f"Status: {'✅ Ativo' if aluno['status_pagamento'] else '❌ Bloqueado'}")
+                st.write(f"Status: {'✅ ATIVO' if aluno['status_pagamento'] else '❌ BLOQUEADO'}")
             
             with col_venc:
                 v_data = date.fromisoformat(aluno['data_vencimento']) if aluno.get('data_vencimento') else date.today()
                 nova_dt = st.date_input("Vencimento", value=v_data, key=f"d_{aluno['id']}")
-                st.write(f"Vence em: {formatar_data_br(str(nova_dt))}")
             
             with col_btns:
                 st.write("") # Espaçador
+                # Botão Salvar (Atualiza data e garante que fica ativo)
                 if st.button("💾 Salvar Data", key=f"s_{aluno['id']}", use_container_width=True):
                     supabase.table("usuarios_app").update({"data_vencimento": str(nova_dt), "status_pagamento": True}).eq("id", aluno['id']).execute()
                     st.rerun()
-                if st.button("🔒 Bloquear", key=f"b_{aluno['id']}", use_container_width=True):
-                    supabase.table("usuarios_app").update({"status_pagamento": False}).eq("id", aluno['id']).execute()
-                    st.rerun()
+                
+                # BOTÃO DINÂMICO: Ativar ou Bloquear
+                if aluno['status_pagamento']:
+                    if st.button("🚫 Bloquear", key=f"b_{aluno['id']}", use_container_width=True):
+                        supabase.table("usuarios_app").update({"status_pagamento": False}).eq("id", aluno['id']).execute()
+                        st.rerun()
+                else:
+                    if st.button("✅ Ativar", key=f"a_{aluno['id']}", use_container_width=True):
+                        supabase.table("usuarios_app").update({"status_pagamento": True}).eq("id", aluno['id']).execute()
+                        st.rerun()
 
 else:
-    # --- LAYOUT ALUNO (MANTIDO) ---
+    # --- DASHBOARD ALUNO (MANTIDO) ---
     st.title(f"🚀 Dashboard: {user['nome']}")
     if not user.get('status_pagamento'):
         st.error("⚠️ Acesso pendente de renovação.")
