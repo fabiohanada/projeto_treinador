@@ -7,7 +7,7 @@ from supabase import create_client
 from twilio.rest import Client 
 
 # ==========================================
-# VERSÃO: v5.6 (LAYOUT ORIGINAL + RODAPÉ CORRIGIDO)
+# VERSÃO: v5.6 (CADASTRO COM TELEFONE + RODAPÉ CORRIGIDO)
 # ==========================================
 
 st.set_page_config(page_title="Fábio Assessoria v5.6", layout="wide", page_icon="🏃‍♂️")
@@ -38,10 +38,11 @@ def formatar_data_br(data_str):
     try: return datetime.strptime(str(data_str), '%Y-%m-%d').strftime('%d/%m/%Y')
     except: return str(data_str)
 
-def enviar_whatsapp(nome):
+def enviar_whatsapp(nome, telefone_aluno=None):
     if not twilio_pronto: return
     try:
         client = Client(TW_SID, TW_TOKEN)
+        # Avisa o admin (você)
         client.messages.create(from_=f"whatsapp:{TW_FROM}", to=f"whatsapp:{TW_TO}", body=f"Fábio, novo pagamento detectado de {nome.upper()}.")
     except: pass
 
@@ -100,6 +101,8 @@ if not st.session_state.logado:
             with st.form("cad_form"):
                 n_nome = st.text_input("Nome Completo")
                 n_email = st.text_input("E-mail")
+                # CAMPO NOVO ADICIONADO AQUI
+                n_telefone = st.text_input("Celular / WhatsApp")
                 n_senha = st.text_input("Crie uma Senha", type="password")
                 aceite = st.checkbox("Li e aceito os Termos de Uso e a Política de Privacidade (LGPD).")
                 with st.expander("📄 Ver Termos de Uso e LGPD"):
@@ -108,9 +111,17 @@ if not st.session_state.logado:
                     if not aceite: st.error("Você precisa aceitar os termos.")
                     elif n_nome and n_email and n_senha:
                         try:
-                            supabase.table("usuarios_app").insert({"nome": n_nome, "email": n_email, "senha": hash_senha(n_senha), "status_pagamento": False}).execute()
+                            # INSERÇÃO NO BANCO COM O CAMPO TELEFONE
+                            supabase.table("usuarios_app").insert({
+                                "nome": n_nome, 
+                                "email": n_email, 
+                                "telefone": n_telefone, # Importante ter a coluna 'telefone' no Supabase
+                                "senha": hash_senha(n_senha), 
+                                "status_pagamento": False
+                            }).execute()
                             st.success("Cadastro realizado! Peça liberação ao Fábio.")
-                        except: st.error("Este e-mail já está cadastrado.")
+                        except Exception as ex: 
+                            st.error(f"Erro ao cadastrar. Verifique se o e-mail já existe. (Erro: {ex})")
     st.stop()
 
 user = st.session_state.user_info
@@ -134,11 +145,16 @@ if eh_admin:
     if res_alertas.data:
         for a in res_alertas.data: st.error(f"🚨 {a['mensagem']}")
     st.divider()
+    # Listagem ajustada para mostrar telefone se necessário
     alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
     for aluno in alunos.data:
         with st.container(border=True):
             c1, c2, c3 = st.columns([2, 1.5, 1.5])
-            with c1: st.write(f"**{aluno['nome']}**\nStatus: {'✅ Ativo' if aluno['status_pagamento'] else '❌ Bloqueado'}")
+            with c1: 
+                st.write(f"**{aluno['nome']}**")
+                if aluno.get('telefone'):
+                    st.caption(f"📞 {aluno['telefone']}")
+                st.write(f"Status: {'✅ Ativo' if aluno['status_pagamento'] else '❌ Bloqueado'}")
             with c2: nova_dt = st.date_input("Vencimento", value=date.today(), key=f"dt_{aluno['id']}")
             with c3:
                 if st.button("💾 Salvar", key=f"sv_{aluno['id']}"):
@@ -169,21 +185,21 @@ else:
         with c2: st.plotly_chart(px.line(df, x='data', y='fc_media', title="FC Média"), use_container_width=True)
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-# --- RODAPÉ BLINDADO (SOLUÇÃO TÉCNICA) ---
+# --- RODAPÉ BLINDADO (TÉCNICA DE DOWNLOAD E EMBUTIR) ---
 st.markdown("---")
 
 def get_strava_logo_html():
-    # Esta função faz o Python baixar a imagem e converter para texto
-    # O navegador recebe a imagem pronta, sem precisar acessar link externo
+    # Esta função força o download da imagem e a embuti no HTML
     url = "https://strava.github.io/api/images/api_logo_pwrdBy_strava_horiz_light.png"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=2)
         if response.status_code == 200:
             encoded = base64.b64encode(response.content).decode()
             return f'<img src="data:image/png;base64,{encoded}" width="160">'
     except:
         pass
-    return "Powered by Strava" # Fallback simples
+    # Fallback se falhar o download
+    return '<span style="color: #FC4C02; font-weight: bold;">Powered by STRAVA</span>'
 
 logo_html = get_strava_logo_html()
 
