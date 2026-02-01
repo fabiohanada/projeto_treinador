@@ -1,80 +1,96 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from datetime import date
-import urllib.parse
-from modules.utils import hash_senha, formatar_data_br, REDIRECT_URI, PIX_COPIA_COLA, enviar_whatsapp
+from datetime import datetime, date
 
 def renderizar_tela_login(supabase):
-    st.markdown("<h2 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h2>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 1.8, 1])
-    with c2:
-        tab_login, tab_cadastro = st.tabs(["🔑 Entrar", "📝 Novo Aluno"])
-        with tab_login:
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("<h1 style='text-align: center;'>🏃‍♂️ Fábio Assessoria</h1>", unsafe_allow_html=True)
+        st.caption("<p style='text-align: center;'>v8.1 - Oficial</p>", unsafe_allow_html=True)
+        
+        tab1, tab2 = st.tabs(["Entrar", "Novo Aluno"])
+        
+        with tab1:
             with st.form("login_form"):
-                e = st.text_input("E-mail")
-                s = st.text_input("Senha", type="password")
+                email = st.text_input("E-mail")
+                senha = st.text_input("Senha", type="password")
                 if st.form_submit_button("Acessar Painel", type="primary", width="stretch"):
-                    u = supabase.table("usuarios_app").select("*").eq("email", e).eq("senha", hash_senha(s)).execute()
-                    if u.data:
-                        st.session_state.logado = True
-                        st.session_state.user_info = u.data[0]
-                        st.rerun()
-                    else: st.error("E-mail ou senha incorretos.")
+                    try:
+                        res = supabase.table("usuarios_app").select("*").eq("email", email).execute()
+                        if res.data:
+                            user = res.data[0]
+                            if str(user['senha']) == str(senha):
+                                st.session_state.logado = True
+                                st.session_state.user_info = user
+                                st.rerun()
+                            else: st.error("Senha incorreta.")
+                        else: st.error("Utilizador não encontrado.")
+                    except Exception as e: st.error(f"Erro de conexão: {e}")
 
-        with tab_cadastro:
-            with st.form("cad_form"):
-                st.markdown("### 📝 Cadastro de Aluno")
-                n_nome = st.text_input("Nome Completo")
-                n_email = st.text_input("E-mail")
-                n_tel = st.text_input("WhatsApp (Ex: +5511999999999)")
-                n_senha = st.text_input("Crie uma Senha", type="password")
+        with tab2:
+            st.subheader("Cadastro de Novo Aluno")
+            with st.form("cadastro_form"):
+                n = st.text_input("Nome Completo")
+                e = st.text_input("E-mail")
+                t = st.text_input("Telefone")
+                s = st.text_input("Senha", type="password")
                 st.markdown("---")
-                st.info("🔒 **LGPD:** Você autoriza o uso dos dados de treino para consultoria.")
-                aceite = st.checkbox("Li e concordo com os termos.")
-                if st.form_submit_button("Finalizar Cadastro", type="primary", width="stretch"):
-                    if not aceite: st.warning("Aceite a LGPD.")
-                    elif n_nome and n_email and n_senha:
+                # CORREÇÃO 1: Restaurado o termo LGPD com texto claro
+                st.info("Termos LGPD: Seus dados serão utilizados apenas para fins de consultoria esportiva e sincronização com o Strava.")
+                aceite = st.checkbox("Eu aceito os termos de uso e política de privacidade (LGPD)")
+                
+                if st.form_submit_button("Finalizar Cadastro", width="stretch"):
+                    if aceite and n and e and t and s:
                         try:
-                            supabase.table("usuarios_app").insert({"nome": n_nome, "email": n_email, "telefone": n_tel, "senha": hash_senha(n_senha), "status_pagamento": False}).execute()
-                            enviar_whatsapp(st.secrets["MEU_CELULAR"], f"🚀 *Novo Aluno:* {n_nome}")
-                            st.success("✅ Cadastro feito! Aguarde liberação.")
-                        except: st.error("Erro no cadastro.")
+                            supabase.table("usuarios_app").insert({
+                                "nome": n, "email": e, "telefone": t, "senha": s,
+                                "is_admin": False, "status_pagamento": False,
+                                "data_vencimento": str(date.today()), "aceite_lgpd": True,
+                                "bloqueado": False
+                            }).execute()
+                            st.success("Cadastro realizado! Aguarde a liberação do seu acesso.")
+                        except Exception as err: st.error(f"Erro ao salvar: {err}")
+                    else:
+                        st.warning("Você precisa preencher tudo e aceitar o termo LGPD.")
 
 def renderizar_tela_admin(supabase):
-    st.title("👨‍🏫 Central do Treinador")
-    alunos = supabase.table("usuarios_app").select("*").eq("is_admin", False).execute()
-    for aluno in alunos.data:
-        with st.container(border=True):
-            col1, col2, col3 = st.columns([2, 2, 1.5])
-            with col1:
-                st.subheader(aluno['nome'])
-                st.write(f"**Status:** {'✅ ATIVO' if aluno['status_pagamento'] else '❌ BLOQUEADO'}")
-            with col2:
-                v_data = date.fromisoformat(aluno['data_vencimento']) if aluno.get('data_vencimento') else date.today()
-                nova_dt = st.date_input("Vencimento", value=v_data, key=f"d_{aluno['id']}")
-            with col3:
-                if st.button("💾 Salvar", key=f"s_{aluno['id']}", width="stretch"):
-                    supabase.table("usuarios_app").update({"data_vencimento": str(nova_dt), "status_pagamento": True}).eq("id", aluno['id']).execute()
-                    st.rerun()
-                if st.button("🚫 Bloquear" if aluno['status_pagamento'] else "✅ Ativar", key=f"t_{aluno['id']}", width="stretch"):
-                    supabase.table("usuarios_app").update({"status_pagamento": not aluno['status_pagamento']}).eq("id", aluno['id']).execute()
-                    st.rerun()
+    st.title("Gestão de Alunos 🚀")
+    try:
+        res = supabase.table("usuarios_app").select("*").eq("is_admin", False).order("nome").execute()
+    except Exception as e:
+        st.error(f"Erro: {e}")
+        return
 
-def renderizar_tela_aluno(supabase, user, client_id):
-    st.title(f"🚀 Dashboard: {user['nome']}")
-    if not user.get('status_pagamento'):
-        st.error("⚠️ Acesso suspenso.")
-        st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=150x150&data={urllib.parse.quote(PIX_COPIA_COLA)}")
-        st.code(PIX_COPIA_COLA)
-        st.stop()
+    if res.data:
+        df = pd.DataFrame(res.data)
+        cols = st.columns([2.5, 2, 1.5, 2.5])
+        cols[0].write("**Nome**")
+        cols[1].write("**Data de Vencimento**")
+        cols[2].write("**Status**")
+        cols[3].write("**Ação**")
+        st.markdown("---")
 
-    res = supabase.table("treinos_alunos").select("*").eq("aluno_id", user['id']).order("data", desc=True).execute()
-    df = pd.DataFrame(res.data)
-    if not df.empty:
-        c1, c2 = st.columns(2)
-        # CORREÇÃO 2026: width="stretch"
-        with c1: st.plotly_chart(px.bar(df, x='data', y='distancia', title="Volume (km)"), width="stretch")
-        with c2: st.plotly_chart(px.line(df, x='data', y='fc_media', title="FC Média"), width="stretch")
-        st.dataframe(df, width="stretch", hide_index=True)
-    else: st.info("Conecte seu Strava na barra lateral.")
+        for index, row in df.iterrows():
+            c1, c2, c3, c4 = st.columns([2.5, 2, 1.5, 2.5])
+            c1.write(f"**{row['nome']}**")
+            
+            # Seletor de Data
+            dv = pd.to_datetime(row['data_vencimento'])
+            nova_dt = c2.date_input("Venc", value=dv, key=f"dt_{row['id']}", label_visibility="collapsed")
+            if nova_dt != dv.date():
+                supabase.table("usuarios_app").update({"data_vencimento": str(nova_dt)}).eq("id", row['id']).execute()
+                st.rerun()
+            
+            # Status
+            bloq = row.get('bloqueado', False)
+            c3.write("🚫 Bloqueado" if bloq else "✅ Ativo")
+
+            # Ações
+            b1, b2 = c4.columns(2)
+            if b1.button("Liberar", key=f"l_{row['id']}", width="stretch"):
+                supabase.table("usuarios_app").update({"bloqueado": False}).eq("id", row['id']).execute()
+                st.rerun()
+            if b2.button("Bloquear", key=f"b_{row['id']}", width="stretch"):
+                supabase.table("usuarios_app").update({"bloqueado": True}).eq("id", row['id']).execute()
+                st.rerun()
+            st.markdown("<hr style='margin:0.5em 0; opacity:0.1;'>", unsafe_allow_html=True)
