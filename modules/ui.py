@@ -1,59 +1,64 @@
 import streamlit as st
-import base64
-import os
 
 def aplicar_estilo_css():
+    """
+    Aplica o CSS global mantendo o layout v8.1.
+    """
     st.markdown("""
         <style>
-        /* Garante espaço no final da página para o conteúdo não ficar atrás do rodapé */
-        .main .block-container { 
-            padding-bottom: 120px; 
-        }
-        
-        /* Rodapé Fixo na Direita */
-        .footer-container {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            background-color: white;
-            border-top: 1px solid #e0e0e0;
-            padding: 10px 30px;
-            z-index: 99999;
-            text-align: right; /* Alinha conteúdo à direita */
-        }
-        
-        .footer-container img {
-            height: 32px;
-            width: auto;
-        }
-
-        /* Aumenta o espaço entre os botões da Sidebar */
-        div[data-testid="stSidebarNav"] {
-            margin-bottom: 20px;
-        }
-        
-        /* Classe utilitária para margens */
-        .spacer {
-            margin-top: 20px;
+        .main { 
+            background-color: #f5f7f9; 
         }
         </style>
-        """, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-def exibir_rodape_strava():
-    """Exibe o logo Powered by Strava fixo no canto inferior direito."""
-    arquivo_local = "strava_logo.png"
-    url_oficial = "https://raw.githubusercontent.com/strava/api/master/docs/images/api_logo_pwrdBy_strava_horiz_light.png"
+def exibir_botao_strava_sidebar():
+    """
+    Exibe o botão 'Connect with Strava' (Versão Texto Robusta).
+    """
+    client_id = st.secrets.get("STRAVA_CLIENT_ID", "")
+    redirect_uri = "http://localhost:8501" 
     
-    # Tenta carregar local via Base64 para garantir posicionamento
-    img_html = f'<img src="{url_oficial}" alt="Powered by Strava">'
-    
-    if os.path.exists(arquivo_local):
-        try:
-            with open(arquivo_local, "rb") as f:
-                img_b64 = base64.b64encode(f.read()).decode()
-                img_html = f'<img src="data:image/png;base64,{img_b64}" alt="Powered by Strava">'
-        except:
-            pass            
+    auth_url = f"https://www.strava.com/oauth/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&approval_prompt=auto&scope=read,activity:read_all"
 
-    st.markdown(f'<div class="footer-container">{img_html}</div>', unsafe_allow_html=True)
+    botao_html = f"""
+    <a href="{auth_url}" target="_self" style="text-decoration: none; width: 100%; display: block;">
+        <div style="
+            background-color: #FC4C02; 
+            color: white;
+            font-weight: bold;
+            font-family: sans-serif;
+            font-size: 15px;
+            padding: 12px 15px; 
+            border-radius: 4px; 
+            text-align: center;
+            box-shadow: 0px 2px 5px rgba(0,0,0,0.2); 
+            transition: all 0.2s ease;
+        "
+        onmouseover="this.style.backgroundColor='#E34402'; this.style.transform='translateY(-1px)';"
+        onmouseout="this.style.backgroundColor='#FC4C02'; this.style.transform='translateY(0)';"
+        >
+            Connect with Strava
+        </div>
+    </a>
+    """
+    st.markdown(botao_html, unsafe_allow_html=True)
+
+def exibir_logo_rodape():
+    """
+    Exibe o rodapé 'Powered by STRAVA' (Apenas Texto).
+    Removido o ícone SVG conforme solicitado.
+    """
+    
+    # CSS do container (Mantém o posicionamento v8.1)
+    estilo_container = "position: fixed; bottom: 10px; right: 15px; z-index: 9999; background-color: rgba(255, 255, 255, 0.95); padding: 6px 12px; border-radius: 8px; border: 1px solid #e0e0e0; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.08); font-family: sans-serif;"
+
+    # HTML Final (Sem o ícone SVG)
+    html_rodape = f"""
+    <div style="{estilo_container}">
+        <span style="color: #666; font-size: 11px; margin-right: 4px;">Powered by</span>
+        <span style="color: #FC4C02; font-size: 13px; font-weight: 800;">STRAVA</span>
+    </div>
+    """
+    
+    st.markdown(html_rodape, unsafe_allow_html=True)
