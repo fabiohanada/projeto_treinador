@@ -8,7 +8,7 @@ from modules.ui import aplicar_estilo_css, exibir_logo_rodape, estilizar_botoes
 from modules.views import renderizar_tela_login, renderizar_tela_admin, renderizar_tela_bloqueio_financeiro
 
 # --- CONFIGURAÇÕES ---
-VERSAO = "v9.0 (Estável)"
+VERSAO = "v9.5 (Admin Restaurado)"
 st.set_page_config(page_title=f"Fábio Assessoria {VERSAO}", layout="wide", page_icon="🏃‍♂️")
 
 try:
@@ -44,11 +44,10 @@ else:
         st.markdown(f"### Fábio Assessoria")
         st.write(f"👤 **{user['nome']}**")
         
+        # Menu apenas para Alunos (não Admin)
         if not user.get('is_admin'):
             if 'strava_access_token' in st.session_state:
-                # CORREÇÃO CIRÚRGICA AQUI: width='stretch'
                 if st.button("Sincronizar Agora", type="primary", width='stretch'):
-                    # ... lógica mantida ...
                     pass 
             else:
                 client_id = st.secrets["STRAVA_CLIENT_ID"]
@@ -57,14 +56,21 @@ else:
                 st.markdown(f'''<a href="{link}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Connect with Strava</button></a>''', unsafe_allow_html=True)
         
         st.markdown("---")
-        # CORREÇÃO CIRÚRGICA AQUI: width='stretch'
         if st.button("Sair / Logoff", type="secondary", width='stretch'):
             st.session_state.clear()
             st.query_params.clear()
             st.rerun()
 
-    if user.get('bloqueado') or not user.get('pago', True):
+    # --- ROTEAMENTO DE TELAS (CORRIGIDO) ---
+    # 1. Se for Admin, MOSTRA O PAINEL ADMIN e para por aqui.
+    if user.get('is_admin') == True:
+        renderizar_tela_admin(supabase)
+        
+    # 2. Se for Aluno bloqueado, mostra bloqueio.
+    elif user.get('bloqueado') or not user.get('pago', True):
         renderizar_tela_bloqueio_financeiro()
+        
+    # 3. Se for Aluno normal, mostra Dashboard.
     else:
         st.title(f"Olá, {user['nome']}! 🏃‍♂️")
         try:
@@ -74,10 +80,8 @@ else:
                 df = pd.DataFrame(res.data)
                 df['Data_Exibicao'] = pd.to_datetime(df['data_treino']).dt.strftime('%d/%m')
                 c1, c2 = st.columns(2)
-                # CORREÇÃO CIRÚRGICA AQUI: width='stretch' nos gráficos
                 with c1: st.plotly_chart(px.bar(df, x='Data_Exibicao', y='distancia'), width='stretch')
                 with c2: st.plotly_chart(px.area(df, x='Data_Exibicao', y='trimp_score'), width='stretch')
-                # CORREÇÃO CIRÚRGICA AQUI: width='stretch' na tabela
                 st.dataframe(df, hide_index=True, width='stretch')
         except: pass
 

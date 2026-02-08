@@ -1,8 +1,47 @@
 import streamlit as st
+import pandas as pd
 import time
+from datetime import datetime, date
+
+# --- FUNÇÕES DE AÇÃO DO ADMIN (CORRIGIDAS PARA 'status_pagamento') ---
+def atualizar_data_vencimento(supabase, user_id, nova_data):
+    try:
+        supabase.table("usuarios_app").update({"data_vencimento": str(nova_data)}).eq("id", str(user_id)).execute()
+        st.toast("Data salva!", icon="💾")
+    except Exception as e:
+        st.toast("Erro ao salvar data.", icon="⚠️")
+
+def alternar_bloqueio(supabase, user_id, status_atual_bloqueado):
+    """
+    Atualiza 'bloqueado' e 'status_pagamento' (nome correto da coluna no seu banco).
+    """
+    novo_bloqueio = not status_atual_bloqueado
+    # Se bloquear (True), status_pagamento vira False. Se ativar, vira True.
+    novo_status_pagamento = not novo_bloqueio 
+    
+    try:
+        # Atualiza usando os nomes exatos das colunas da sua foto
+        supabase.table("usuarios_app").update({
+            "bloqueado": novo_bloqueio,
+            "status_pagamento": novo_status_pagamento 
+        }).eq("id", str(user_id)).execute()
+        
+        # Feedback visual
+        if novo_bloqueio:
+            st.toast("Aluno Bloqueado!", icon="⛔")
+        else:
+            st.toast("Aluno Ativado!", icon="✅")
+            
+        time.sleep(0.5)
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"Erro ao atualizar banco: {e}")
+
+# --- TELAS ---
 
 def renderizar_tela_login(supabase_client):
-    """Layout v8.9.7 mantido intacto."""
+    """Layout v8.9.7 (Intacto)."""
     st.markdown("<br>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 2, 1])
     
@@ -15,7 +54,6 @@ def renderizar_tela_login(supabase_client):
             with st.form("form_login"):
                 email = st.text_input("E-mail")
                 senha = st.text_input("Senha", type="password")
-                # CORREÇÃO CIRÚRGICA AQUI:
                 botao_entrar = st.form_submit_button("Entrar", type="primary", width='stretch')
                 
                 if botao_entrar:
@@ -24,22 +62,24 @@ def renderizar_tela_login(supabase_client):
                     else:
                         with st.spinner("Autenticando..."):
                             email = email.strip().lower()
-                            res = supabase_client.table("usuarios_app").select("*").eq("email", email).eq("senha", senha).execute()
-                            
-                            if res.data:
-                                user = res.data[0]
-                                st.session_state.user_info = user
-                                st.session_state.logado = True
+                            try:
+                                res = supabase_client.table("usuarios_app").select("*").eq("email", email).eq("senha", senha).execute()
                                 
-                                # Lógica F5 v9.0 (Mantida)
-                                uid = str(user.get('id') or user.get('uuid'))
-                                st.query_params["session_id"] = uid
-                                
-                                st.success(f"Bem-vindo, {user['nome']}!")
-                                time.sleep(0.5)
-                                st.rerun()
-                            else:
-                                st.error("E-mail ou senha incorretos.")
+                                if res.data:
+                                    user = res.data[0]
+                                    st.session_state.user_info = user
+                                    st.session_state.logado = True
+                                    
+                                    uid = str(user.get('id') or user.get('uuid'))
+                                    st.query_params["session_id"] = uid
+                                    
+                                    st.success(f"Bem-vindo, {user['nome']}!")
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                else:
+                                    st.error("E-mail ou senha incorretos.")
+                            except Exception as e:
+                                st.error(f"Erro técnico: {e}")
 
         with aba_cadastro:
             with st.form("form_cadastro"):
@@ -51,11 +91,10 @@ def renderizar_tela_login(supabase_client):
                 
                 st.markdown("---")
                 st.markdown("### Termos e Privacidade")
-                st.write("Ao clicar em aceitar, você concorda com os nossos Termos de Uso e Política de Privacidade (LGPD) e permite o processamento de seus dados para fins de análise de performance esportiva.")
+                st.caption("Ao clicar em aceitar, você concorda com os nossos Termos de Uso e Política de Privacidade (LGPD).")
                 
                 aceite_termos = st.checkbox("Eu li e aceito os termos e condições.")
                 
-                # CORREÇÃO CIRÚRGICA AQUI:
                 botao_cadastrar = st.form_submit_button("Cadastrar", width='stretch')
                 
                 if botao_cadastrar:
@@ -67,18 +106,80 @@ def renderizar_tela_login(supabase_client):
                         st.error("Aceite os termos para continuar.")
                     else:
                         with st.spinner("Criando conta..."):
-                            dados_registro = {
+                            # CORREÇÃO NO CADASTRO TAMBÉM: status_pagamento
+                            dados = {
                                 "nome": novo_nome, "email": novo_email.strip().lower(),
                                 "telefone": novo_telefone, "senha": nova_senha,
+                                "is_admin": False, "status_pagamento": True, "aceite_lgpd": True
                             }
                             try:
-                                supabase_client.table("usuarios_app").insert(dados_registro).execute()
-                                st.success("Conta criada! Faça login na aba ao lado.")
-                            except Exception:
-                                st.error("Erro ao cadastrar. Verifique se o e-mail já existe.")
+                                supabase_client.table("usuarios_app").insert(dados).execute()
+                                st.success("Conta criada! Faça login.")
+                            except:
+                                st.error("Erro ao cadastrar. E-mail já existe.")
 
 def renderizar_tela_admin(supabase_client):
+    """
+    PAINEL ADMIN (Mapeado para colunas da imagem).
+    """
     st.title("Painel Administrativo 🔒")
+    st.markdown("### 📋 Controle de Alunos")
+
+    try:
+        res = supabase_client.table("usuarios_app").select("*").order("nome").execute()
+        users = res.data
+        
+        if users:
+            st.markdown("---")
+            c1, c2, c3 = st.columns([2, 1.5, 1.5])
+            c1.markdown("**Nome do Aluno**")
+            c2.markdown("**Data Expiração** (Editável)")
+            c3.markdown("**Ação (Clique para alterar)**")
+            st.markdown("---")
+
+            for user in users:
+                if user.get('is_admin'): continue 
+
+                col_nome, col_data, col_acao = st.columns([2, 1.5, 1.5])
+                
+                # 1. Nome
+                with col_nome:
+                    st.write(f"👤 **{user['nome']}**")
+
+                # 2. Data
+                with col_data:
+                    data_atual = user.get('data_vencimento')
+                    if data_atual:
+                        try:
+                            val_data = datetime.strptime(data_atual, '%Y-%m-%d').date()
+                        except:
+                            val_data = date.today()
+                    else:
+                        val_data = date.today()
+
+                    nova_data = st.date_input("Vencimento", value=val_data, key=f"d_{user['id']}", label_visibility="collapsed")
+                    if str(nova_data) != str(data_atual) and data_atual is not None:
+                         atualizar_data_vencimento(supabase_client, user['id'], nova_data)
+
+                # 3. Botão (Mapeado para 'bloqueado' e 'status_pagamento')
+                with col_acao:
+                    # Usa a coluna 'bloqueado' do banco (na imagem é a que começa com 'b...')
+                    is_bloqueado = user.get('bloqueado', False)
+                    
+                    if is_bloqueado:
+                        if st.button("✅ Ativar", key=f"btn_a_{user['id']}", width='stretch'):
+                            alternar_bloqueio(supabase_client, user['id'], True)
+                    else:
+                        if st.button("⛔ Bloquear", key=f"btn_b_{user['id']}", type="primary", width='stretch'):
+                            alternar_bloqueio(supabase_client, user['id'], False)
+                
+                st.markdown("<hr style='margin: 5px 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
+                
+        else:
+            st.info("Nenhum aluno cadastrado.")
+            
+    except Exception as e:
+        st.error(f"Erro ao carregar lista: {e}")
 
 def renderizar_tela_bloqueio_financeiro():
     st.markdown("---")
