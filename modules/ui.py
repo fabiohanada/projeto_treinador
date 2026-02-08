@@ -1,23 +1,20 @@
 import streamlit as st
 
 def aplicar_estilo_css():
-    """Fundo cinza claro da v9.0."""
+    """Fundo cinza claro padrão."""
     st.markdown("""<style>.main { background-color: #f5f7f9; }</style>""", unsafe_allow_html=True)
 
 def estilizar_botoes():
     """
-    CSS CORRETIVO v9.0:
-    - Primary (Connect): Laranja Strava (#FC4C02)
-    - Secondary (Sair): Branco/Transparente com borda
+    CSS v9.7:
+    - Primary: Laranja (#FC4C02)
+    - Secondary: Branco com borda
     """
     st.markdown("""
         <style>
-        /* Título da Sidebar */
         [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
             color: #FC4C02 !important;
         }
-
-        /* Botão PRIMARY (Connect) -> LARANJA */
         button[kind="primary"] {
             background-color: #FC4C02 !important;
             color: white !important;
@@ -28,8 +25,6 @@ def estilizar_botoes():
             background-color: #d13e02 !important;
             color: white !important;
         }
-
-        /* Botão SECONDARY (Sair) -> BRANCO */
         [data-testid="stSidebar"] button[kind="secondary"] {
             background-color: transparent !important;
             color: #333 !important;

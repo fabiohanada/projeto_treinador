@@ -3,12 +3,13 @@ import pandas as pd
 import plotly.express as px
 import requests
 from supabase import create_client
+from datetime import datetime
 
 from modules.ui import aplicar_estilo_css, exibir_logo_rodape, estilizar_botoes
 from modules.views import renderizar_tela_login, renderizar_tela_admin, renderizar_tela_bloqueio_financeiro
 
 # --- CONFIGURAÇÕES ---
-VERSAO = "v9.5 (Admin Restaurado)"
+VERSAO = "v9.7 (Estável)"
 st.set_page_config(page_title=f"Fábio Assessoria {VERSAO}", layout="wide", page_icon="🏃‍♂️")
 
 try:
@@ -44,8 +45,17 @@ else:
         st.markdown(f"### Fábio Assessoria")
         st.write(f"👤 **{user['nome']}**")
         
-        # Menu apenas para Alunos (não Admin)
         if not user.get('is_admin'):
+            vencimento = user.get('data_vencimento')
+            if vencimento:
+                try:
+                    data_fmt = datetime.strptime(str(vencimento), '%Y-%m-%d').strftime('%d/%m/%Y')
+                    st.info(f"📅 Vencimento: **{data_fmt}**")
+                except:
+                    st.write(f"📅 Vencimento: {vencimento}")
+            else:
+                st.write("📅 Vencimento: --/--/----")
+
             if 'strava_access_token' in st.session_state:
                 if st.button("Sincronizar Agora", type="primary", width='stretch'):
                     pass 
@@ -61,28 +71,57 @@ else:
             st.query_params.clear()
             st.rerun()
 
-    # --- ROTEAMENTO DE TELAS (CORRIGIDO) ---
-    # 1. Se for Admin, MOSTRA O PAINEL ADMIN e para por aqui.
+    # --- ROTEAMENTO ---
     if user.get('is_admin') == True:
         renderizar_tela_admin(supabase)
         
-    # 2. Se for Aluno bloqueado, mostra bloqueio.
-    elif user.get('bloqueado') or not user.get('pago', True):
+    elif user.get('bloqueado') or not user.get('status_pagamento', True):
         renderizar_tela_bloqueio_financeiro()
         
-    # 3. Se for Aluno normal, mostra Dashboard.
     else:
         st.title(f"Olá, {user['nome']}! 🏃‍♂️")
         try:
             uid = user.get('id') or user.get('uuid')
             res = supabase.table("atividades_fisicas").select("*").eq("id_atleta", uid).execute()
+            
             if res.data:
                 df = pd.DataFrame(res.data)
+                
+                # Gráficos (Histórico Completo)
                 df['Data_Exibicao'] = pd.to_datetime(df['data_treino']).dt.strftime('%d/%m')
                 c1, c2 = st.columns(2)
                 with c1: st.plotly_chart(px.bar(df, x='Data_Exibicao', y='distancia'), width='stretch')
                 with c2: st.plotly_chart(px.area(df, x='Data_Exibicao', y='trimp_score'), width='stretch')
-                st.dataframe(df, hide_index=True, width='stretch')
+                
+                # --- TABELA DE TREINOS ---
+                df_tab = df.copy()
+                
+                # 1. Ordenar (Recentes no topo)
+                df_tab = df_tab.sort_values(by='data_treino', ascending=False)
+                
+                # 2. Limitar (Top 10)
+                df_tab = df_tab.head(10)
+
+                # 3. Formatar
+                df_tab['Data do Treino'] = pd.to_datetime(df_tab['data_treino']).dt.strftime('%d-%m-%y')
+
+                def fmt_dist(x): return f"{float(x):.2f}".replace('.', ',') + " km"
+                df_tab['Distância'] = df_tab['distancia'].apply(fmt_dist)
+
+                def fmt_duracao(minutos):
+                    try:
+                        m = int(minutos)
+                        horas = m // 60
+                        mins_rest = m % 60
+                        return f"{horas:02d}:{mins_rest:02d}"
+                    except: return minutos
+                df_tab['Duração'] = df_tab['duracao'].apply(fmt_duracao)
+                
+                # 4. Renomear e Filtrar
+                df_tab = df_tab.rename(columns={'tipo_esporte': 'Esporte', 'trimp_score': 'Trimp'})
+                colunas_finais = ['Data do Treino', 'Distância', 'Duração', 'Esporte', 'Trimp']
+                
+                st.dataframe(df_tab[colunas_finais], hide_index=True, width='stretch')
         except: pass
 
     exibir_logo_rodape()

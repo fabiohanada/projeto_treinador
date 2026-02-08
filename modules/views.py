@@ -3,51 +3,38 @@ import pandas as pd
 import time
 from datetime import datetime, date
 
-# --- FUNÇÕES DE AÇÃO DO ADMIN (CORRIGIDAS PARA 'status_pagamento') ---
+# --- FUNÇÕES ADMIN ---
 def atualizar_data_vencimento(supabase, user_id, nova_data):
     try:
         supabase.table("usuarios_app").update({"data_vencimento": str(nova_data)}).eq("id", str(user_id)).execute()
         st.toast("Data salva!", icon="💾")
-    except Exception as e:
+    except:
         st.toast("Erro ao salvar data.", icon="⚠️")
 
 def alternar_bloqueio(supabase, user_id, status_atual_bloqueado):
-    """
-    Atualiza 'bloqueado' e 'status_pagamento' (nome correto da coluna no seu banco).
-    """
     novo_bloqueio = not status_atual_bloqueado
-    # Se bloquear (True), status_pagamento vira False. Se ativar, vira True.
-    novo_status_pagamento = not novo_bloqueio 
-    
+    novo_status = not novo_bloqueio 
     try:
-        # Atualiza usando os nomes exatos das colunas da sua foto
         supabase.table("usuarios_app").update({
             "bloqueado": novo_bloqueio,
-            "status_pagamento": novo_status_pagamento 
+            "status_pagamento": novo_status 
         }).eq("id", str(user_id)).execute()
         
-        # Feedback visual
-        if novo_bloqueio:
-            st.toast("Aluno Bloqueado!", icon="⛔")
-        else:
-            st.toast("Aluno Ativado!", icon="✅")
-            
+        if novo_bloqueio: st.toast("Aluno Bloqueado!", icon="⛔")
+        else: st.toast("Aluno Ativado!", icon="✅")
         time.sleep(0.5)
         st.rerun()
-        
     except Exception as e:
-        st.error(f"Erro ao atualizar banco: {e}")
+        st.error(f"Erro no banco: {e}")
 
 # --- TELAS ---
 
 def renderizar_tela_login(supabase_client):
-    """Layout v8.9.7 (Intacto)."""
     st.markdown("<br>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 2, 1])
     
     with c2:
         st.markdown("<h2 style='text-align: center; color: #FC4C02;'>Área do Atleta</h2>", unsafe_allow_html=True)
-        
         aba_login, aba_cadastro = st.tabs(["Fazer Login", "Criar Conta"])
         
         with aba_login:
@@ -64,15 +51,12 @@ def renderizar_tela_login(supabase_client):
                             email = email.strip().lower()
                             try:
                                 res = supabase_client.table("usuarios_app").select("*").eq("email", email).eq("senha", senha).execute()
-                                
                                 if res.data:
                                     user = res.data[0]
                                     st.session_state.user_info = user
                                     st.session_state.logado = True
-                                    
                                     uid = str(user.get('id') or user.get('uuid'))
                                     st.query_params["session_id"] = uid
-                                    
                                     st.success(f"Bem-vindo, {user['nome']}!")
                                     time.sleep(0.5)
                                     st.rerun()
@@ -88,13 +72,10 @@ def renderizar_tela_login(supabase_client):
                 novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="(00) 00000-0000")
                 nova_senha = st.text_input("Defina uma Senha", type="password")
                 confirma_senha = st.text_input("Confirme a Senha", type="password")
-                
                 st.markdown("---")
                 st.markdown("### Termos e Privacidade")
                 st.caption("Ao clicar em aceitar, você concorda com os nossos Termos de Uso e Política de Privacidade (LGPD).")
-                
                 aceite_termos = st.checkbox("Eu li e aceito os termos e condições.")
-                
                 botao_cadastrar = st.form_submit_button("Cadastrar", width='stretch')
                 
                 if botao_cadastrar:
@@ -103,10 +84,9 @@ def renderizar_tela_login(supabase_client):
                     elif nova_senha != confirma_senha:
                         st.error("As senhas não coincidem.")
                     elif not aceite_termos:
-                        st.error("Aceite os termos para continuar.")
+                        st.error("Aceite os termos.")
                     else:
                         with st.spinner("Criando conta..."):
-                            # CORREÇÃO NO CADASTRO TAMBÉM: status_pagamento
                             dados = {
                                 "nome": novo_nome, "email": novo_email.strip().lower(),
                                 "telefone": novo_telefone, "senha": nova_senha,
@@ -119,67 +99,47 @@ def renderizar_tela_login(supabase_client):
                                 st.error("Erro ao cadastrar. E-mail já existe.")
 
 def renderizar_tela_admin(supabase_client):
-    """
-    PAINEL ADMIN (Mapeado para colunas da imagem).
-    """
     st.title("Painel Administrativo 🔒")
     st.markdown("### 📋 Controle de Alunos")
 
     try:
         res = supabase_client.table("usuarios_app").select("*").order("nome").execute()
         users = res.data
-        
         if users:
             st.markdown("---")
             c1, c2, c3 = st.columns([2, 1.5, 1.5])
             c1.markdown("**Nome do Aluno**")
             c2.markdown("**Data Expiração** (Editável)")
-            c3.markdown("**Ação (Clique para alterar)**")
+            c3.markdown("**Ação (Alterar Status)**")
             st.markdown("---")
 
             for user in users:
                 if user.get('is_admin'): continue 
-
                 col_nome, col_data, col_acao = st.columns([2, 1.5, 1.5])
-                
-                # 1. Nome
                 with col_nome:
                     st.write(f"👤 **{user['nome']}**")
-
-                # 2. Data
                 with col_data:
                     data_atual = user.get('data_vencimento')
                     if data_atual:
-                        try:
-                            val_data = datetime.strptime(data_atual, '%Y-%m-%d').date()
-                        except:
-                            val_data = date.today()
-                    else:
-                        val_data = date.today()
-
+                        try: val_data = datetime.strptime(data_atual, '%Y-%m-%d').date()
+                        except: val_data = date.today()
+                    else: val_data = date.today()
                     nova_data = st.date_input("Vencimento", value=val_data, key=f"d_{user['id']}", label_visibility="collapsed")
                     if str(nova_data) != str(data_atual) and data_atual is not None:
                          atualizar_data_vencimento(supabase_client, user['id'], nova_data)
-
-                # 3. Botão (Mapeado para 'bloqueado' e 'status_pagamento')
                 with col_acao:
-                    # Usa a coluna 'bloqueado' do banco (na imagem é a que começa com 'b...')
                     is_bloqueado = user.get('bloqueado', False)
-                    
                     if is_bloqueado:
                         if st.button("✅ Ativar", key=f"btn_a_{user['id']}", width='stretch'):
                             alternar_bloqueio(supabase_client, user['id'], True)
                     else:
                         if st.button("⛔ Bloquear", key=f"btn_b_{user['id']}", type="primary", width='stretch'):
                             alternar_bloqueio(supabase_client, user['id'], False)
-                
                 st.markdown("<hr style='margin: 5px 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
-                
         else:
             st.info("Nenhum aluno cadastrado.")
-            
     except Exception as e:
-        st.error(f"Erro ao carregar lista: {e}")
+        st.error(f"Erro lista: {e}")
 
 def renderizar_tela_bloqueio_financeiro():
     st.markdown("---")
@@ -189,5 +149,9 @@ def renderizar_tela_bloqueio_financeiro():
         st.warning("Regularize sua mensalidade para acessar os gráficos.")
         with st.container(border=True):
             st.markdown("### 💠 Pagamento via PIX")
-            st.code("00020126580014BR.GOV.BCB.PIX...", language="text")
-        st.info("Envie o comprovante para liberação imediata.")
+            col_qr, col_cod = st.columns([1, 2])
+            with col_qr:
+                st.image("https://upload.wikimedia.org/wikipedia/commons/d/d0/QR_code_for_mobile_English_Wikipedia.svg", width=120)
+            with col_cod:
+                st.caption("**Copia e Cola:**")
+                st.code("00020126580014BR.GOV.BCB.PIX0136123e4567-e89b-12d3-a456-426614174000", language="text")
