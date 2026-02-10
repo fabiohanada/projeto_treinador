@@ -142,16 +142,35 @@ def renderizar_tela_admin(supabase_client):
         st.error(f"Erro lista: {e}")
 
 def renderizar_tela_bloqueio_financeiro():
-    st.markdown("---")
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        st.error("⚠️ **ACESSO SUSPENSO**")
-        st.warning("Regularize sua mensalidade para acessar os gráficos.")
+    import streamlit as st
+    
+    col_esq, col_center, col_dir = st.columns([1, 2, 1])
+    
+    with col_center:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        
+        st.error("⚠️ ACESSO SUSPENSO")
+        st.warning("Regularize sua mensalidade para acessar os gráficos e histórico de treinos.")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
         with st.container(border=True):
-            st.markdown("### 💠 Pagamento via PIX")
-            col_qr, col_cod = st.columns([1, 2])
+            st.markdown("<h3 style='text-align: center;'>💠 Pagamento via PIX</h3>", unsafe_allow_html=True)
+            
+            col_qr_esq, col_qr, col_qr_dir = st.columns([1, 2, 1])
             with col_qr:
-                st.image("https://upload.wikimedia.org/wikipedia/commons/d/d0/QR_code_for_mobile_English_Wikipedia.svg", width=120)
-            with col_cod:
-                st.caption("**Copia e Cola:**")
-                st.code("00020126580014BR.GOV.BCB.PIX0136123e4567-e89b-12d3-a456-426614174000", language="text")
+                try:
+                    # CORRIGIDO AQUI: Trocamos use_container_width por width='stretch'
+                    st.image("assets/qrcodeteste.jpeg", width='stretch')
+                except:
+                    st.info("A imagem 'qrcodeteste.jpeg' não foi encontrada na pasta 'assets'.")
+            
+            st.markdown("<p style='text-align: center; margin-bottom: 5px; color: gray;'>PIX Copia e Cola:</p>", unsafe_allow_html=True)
+            
+            # --- COLE SEU CÓDIGO PIX AQUI ---
+            codigo_pix = "00020126400014br.gov.bcb.pix0111287108508050203Pix52040000530398654040.015802BR5912FABIO HANADA6015MOGI DAS CRUZES622905253yBb7pz5vVeUQKXlaL0202mpC63048FC4" 
+            
+            st.code(codigo_pix, language="text")
+            
+        
+            
