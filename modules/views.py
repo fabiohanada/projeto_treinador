@@ -106,27 +106,55 @@ def renderizar_tela_admin(supabase_client):
     st.title("Painel Administrativo 🔒")
 
     # ===============================================================
-    # 🌟 NOVO: VERIFICADOR AUTOMÁTICO DO MERCADO PAGO
+    # 🌟 RASTREADOR AUTOMÁTICO (CORREÇÃO DO CLIQUE DUPLO)
     # ===============================================================
+    
+    # 1. Garante que a lista existe na memória logo no início
+    if 'notificacoes_fechadas' not in st.session_state:
+        st.session_state['notificacoes_fechadas'] = []
+
+    # 2. Função auxiliar para fechar instantaneamente
+    def fechar_aviso(id_pix):
+        st.session_state['notificacoes_fechadas'].append(id_pix)
+
     try:
         token_mp = st.secrets.get("MP_ACCESS_TOKEN")
+        
         if token_mp:
-            # Busca só quem está bloqueado e tem um PIX gerado no sistema
-            pendentes = supabase_client.table("usuarios_app").select("id, nome, id_pagamento_mp").eq("bloqueado", True).not_.is_null("id_pagamento_mp").execute()
-            
-            for aluno in pendentes.data:
-                mp_id = aluno['id_pagamento_mp']
+            response = supabase_client.table("usuarios_app").select("id, nome, id_pagamento_mp").execute()
+            todos_alunos = response.data
+            alunos_com_pix = [aluno for aluno in todos_alunos if aluno.get('id_pagamento_mp')]
+
+            for aluno in alunos_com_pix:
+                mp_id = str(aluno['id_pagamento_mp']).strip()
+                
+                # Se já estiver na lista de fechados, pula fora antes de desenhar
+                if mp_id in st.session_state['notificacoes_fechadas']:
+                    continue
+                
+                if not mp_id or mp_id == "None": continue
+
                 url = f"https://api.mercadopago.com/v1/payments/{mp_id}"
                 headers = {"Authorization": f"Bearer {token_mp}"}
                 
-                # Consulta o Mercado Pago
-                res = requests.get(url, headers=headers).json()
-                
-                # Se o status for "approved" (pagamento confirmado)
-                if res.get("status") == "approved":
-                    st.success(f"📢 **NOTIFICAÇÃO:** O aluno(a) **{aluno['nome']}** fez o pagamento! Verifique sua conta e ative o aluno abaixo.")
+                try:
+                    res = requests.get(url, headers=headers).json()
+                    status_pagamento = res.get("status")
+                    
+                    if status_pagamento == "approved":
+                        with st.container(border=True):
+                            col_msg, col_close = st.columns([5, 1])
+                            
+                            with col_msg:
+                                st.success(f"💰 **PAGAMENTO CONFIRMADO:** O aluno(a) **{aluno['nome']}** pagou! Libere o acesso abaixo.")
+                            
+                            with col_close:
+                                # AQUI ESTÁ A CORREÇÃO MÁGICA: on_click
+                                st.button("✖️ Fechar", key=f"close_{mp_id}", on_click=fechar_aviso, args=(mp_id,))
+                except:
+                    pass
     except Exception as e:
-        pass # Se der algum erro de internet ou faltar o token, o admin continua funcionando normal
+        st.error(f"Erro no sistema de pagamentos: {e}")
     # ===============================================================
 
     st.markdown("### 📋 Controle de Alunos")
@@ -134,12 +162,13 @@ def renderizar_tela_admin(supabase_client):
     try:
         res = supabase_client.table("usuarios_app").select("*").order("nome").execute()
         users = res.data
+        
         if users:
             st.markdown("---")
             c1, c2, c3 = st.columns([2, 1.5, 1.5])
             c1.markdown("**Nome do Aluno**")
-            c2.markdown("**Data Expiração** (Editável)")
-            c3.markdown("**Ação (Alterar Status)**")
+            c2.markdown("**Data Expiração**")
+            c3.markdown("**Ação**")
             st.markdown("---")
 
             for user in users:
@@ -164,22 +193,22 @@ def renderizar_tela_admin(supabase_client):
                          
                 with col_acao:
                     is_bloqueado = user.get('bloqueado', False)
+                    
                     if is_bloqueado:
-                        if st.button("✅ Ativar", key=f"btn_a_{user['id']}", width='stretch'):
-                            # 🌟 NOVO: Limpa o PIX pago para o aluno poder gerar um novo no mês seguinte
+                        if st.button("✅ Liberar", key=f"btn_a_{user['id']}"):
                             supabase_client.table("usuarios_app").update({"id_pagamento_mp": None}).eq("id", user['id']).execute()
-                            
-                            # Mantém a sua função original intacta
                             alternar_bloqueio(supabase_client, user['id'], True)
+                            st.rerun()
                     else:
-                        if st.button("⛔ Bloquear", key=f"btn_b_{user['id']}", type="primary", width='stretch'):
+                        if st.button("⛔ Bloquear", key=f"btn_b_{user['id']}", type="primary"):
                             alternar_bloqueio(supabase_client, user['id'], False)
+                            st.rerun()
                             
                 st.markdown("<hr style='margin: 5px 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
         else:
             st.info("Nenhum aluno cadastrado.")
     except Exception as e:
-        st.error(f"Erro lista: {e}")
+        st.error(f"Erro ao carregar lista: {e}")
 
 def renderizar_tela_bloqueio_financeiro():
     import streamlit as st
@@ -214,7 +243,7 @@ def renderizar_tela_bloqueio_financeiro():
                 url = "https://api.mercadopago.com/v1/payments"
                 headers = {"Authorization": f"Bearer {token_mp}", "X-Idempotency-Key": str(uuid.uuid4())}
                 payload = {
-                    "transaction_amount": 0.01, # 💰 VALOR ALTERADO PARA 1 CENTAVO AQUI PARA TESTES
+                    "transaction_amount": 1.00, # 💰 VALOR ALTERADO PARA 1 CENTAVO AQUI PARA TESTES
                     "description": f"Mensalidade - {user['nome']}",
                     "payment_method_id": "pix",
                     "payer": {"email": f"aluno_{user['id']}@fabioassessoria.com"} 
@@ -222,6 +251,11 @@ def renderizar_tela_bloqueio_financeiro():
                 
                 try:
                     res = requests.post(url, json=payload, headers=headers).json()
+                    
+                    # --- CÓDIGO DE DIAGNÓSTICO ---
+                    if res.get("status") == 400 or res.get("error"):
+                        st.error(f"Erro MP: {res.get('message')} | Causa: {res.get('cause', [{}])[0].get('description')}")
+                    # -----------------------------
                     
                     if "id" in res:
                         mp_id = str(res["id"])
