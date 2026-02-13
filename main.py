@@ -6,22 +6,23 @@ import requests
 from supabase import create_client
 from datetime import datetime, timedelta
 
-# Módulos originais
+# Importação dos seus módulos
 from modules.ui import aplicar_estilo_css, exibir_logo_rodape, estilizar_botoes
-from modules.views import renderizar_tela_login, renderizar_tela_admin, renderizar_tela_bloqueio_financeiro
+from modules.views import renderizar_tela_login, renderizar_tela_admin, renderizar_tela_bloqueio_financeiro, enviar_notificacao_treino
 
-# 1. CONFIGURAÇÕES
+# 1. CONFIGURAÇÕES INICIAIS
 st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
 try:
     supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-except:
+except Exception as e:
+    st.error(f"Erro ao conectar ao Banco de Dados: {e}")
     st.stop()
 
 aplicar_estilo_css()
 estilizar_botoes()
 
-# 2. FUNÇÃO DE SINCRONIZAÇÃO
+# 2. FUNÇÃO DE SINCRONIZAÇÃO (STRAVA -> SUPABASE)
 def processar_sincronizacao(auth_code, user_id):
     try:
         response = requests.post(
@@ -38,30 +39,33 @@ def processar_sincronizacao(auth_code, user_id):
         if token:
             headers = {'Authorization': f'Bearer {token}'}
             atividades = requests.get("https://www.strava.com/api/v3/athlete/activities", 
-                                      headers=headers, params={'per_page': 100}).json()
+                                      headers=headers, params={'per_page': 5}).json()
             
             for act in atividades:
-                if act['type'] in ['Run', 'VirtualRun', 'TrailRun']:
+                if act['type'] in ['Run', 'VirtualRun', 'TrailRun', 'Ride']:
                     dist = act['distance'] / 1000
                     dur_minutos = act['moving_time'] / 60
+                    
+                    # Cálculo de TRIMP simplificado para sincronização
                     trimp_calc = int(dur_minutos * 1.5)
                     
                     dados = {
                         "id_atleta": user_id,
-                        "strava_id": act['id'],
+                        "strava_id": str(act['id']),
                         "tipo_esporte": act['type'],
                         "distancia": dist,
                         "duracao": int(dur_minutos),
                         "data_treino": act['start_date_local'][:10],
                         "trimp_score": trimp_calc
                     }
-                    supabase.table("atividades_fisicas").upsert(dados).execute()
+                    supabase.table("atividades_fisicas").upsert(dados, on_conflict="strava_id").execute()
             return True
         return False
-    except:
+    except Exception as e:
+        st.error(f"Erro na sincronização: {e}")
         return False
 
-# 3. GESTÃO DE SESSÃO
+# 3. GESTÃO DE SESSÃO E CALLBACK DO STRAVA
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
@@ -75,27 +79,34 @@ if not st.session_state.logado and target_id:
         st.session_state.logado = True
         auth_code = q_params.get("code")
         if auth_code:
-            processar_sincronizacao(auth_code, target_id)
+            if processar_sincronizacao(auth_code, target_id):
+                st.session_state['just_synced'] = True
             st.query_params.clear()
             st.query_params["session_id"] = target_id
             st.rerun()
 
-# 4. FUNÇÃO GRÁFICOS
+# 4. FUNÇÃO DE GRÁFICOS
 def gerar_grafico_analise(df, titulo, dias=7):
-    hoje = datetime.now().date()
+    # Garantir que a coluna de data esteja limpa de fuso horário para o gráfico
+    df_temp = df.copy()
+    df_temp['data_treino'] = pd.to_datetime(df_temp['data_treino']).dt.tz_localize(None)
+    
+    hoje = datetime.now()
     data_inicio = hoje - timedelta(days=dias)
-    df_filtrado = df[df['data_treino'].dt.date > data_inicio].copy()
+    df_filtrado = df_temp[df_temp['data_treino'] > data_inicio].copy()
+    
+    if df_filtrado.empty: return None
+    
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Bar(x=df_filtrado['data_treino'], y=df_filtrado['distancia'], name="Km", marker_color='lightgrey', opacity=0.5), secondary_y=True)
     fig.add_trace(go.Scatter(x=df_filtrado['data_treino'], y=df_filtrado['trimp_score'], name="TRIMP", mode='lines+markers', line=dict(color='#FC4C02', width=3)), secondary_y=False)
-    fig.add_hrect(y0=70, y1=140, fillcolor="green", opacity=0.1, line_width=0, annotation_text="Ideal")
-    fig.add_hrect(y0=180, y1=250, fillcolor="red", opacity=0.1, line_width=0, annotation_text="Sobrecarga")
+    
     fig.update_layout(title_text=titulo, template="plotly_white", hovermode="x unified", showlegend=False, height=400)
-    fig.update_yaxes(title_text="TRIMP", secondary_y=False, range=[0, 250])
-    fig.update_yaxes(title_text="Km", secondary_y=True, showgrid=False)
+    fig.update_yaxes(title_text="Esforço (TRIMP)", secondary_y=False)
+    fig.update_yaxes(title_text="Distância (Km)", secondary_y=True, showgrid=False)
     return fig
 
-# 5. ROTEAMENTO E INTERFACE
+# 5. ROTEAMENTO DE TELAS
 if not st.session_state.logado:
     renderizar_tela_login(supabase)
 else:
@@ -116,13 +127,13 @@ else:
                 except: pass
 
             client_id = st.secrets['STRAVA_CLIENT_ID']
-            redirect_uri = "http://localhost:8501" 
-            link = f"https://www.strava.com/oauth/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
+            redirect_uri = st.secrets.get("REDIRECT_URI", "http://localhost:8501")
+            link_strava = f"https://www.strava.com/oauth/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
             
-            st.markdown(f'''<a href="{link}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Conectar Strava</button></a>''', unsafe_allow_html=True)
+            st.markdown(f'''<a href="{link_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">🔄 Sincronizar Strava</button></a>''', unsafe_allow_html=True)
 
         st.markdown("---")
-        if st.button("Sair", type="secondary", width='stretch'):
+        if st.button("Sair da Conta", type="secondary", use_container_width=True):
             st.session_state.clear()
             st.query_params.clear()
             st.rerun()
@@ -134,38 +145,66 @@ else:
         renderizar_tela_bloqueio_financeiro()
         
     else:
+        # --- TELA DO ALUNO ---
         st.title(f"Olá, {user['nome'].split()[0]}! 🏃‍♂️")
-        
+
+        with st.expander("🛠️ Ferramentas de Teste (WhatsApp)"):
+            if st.button("🚀 Enviar Notificação de Teste"):
+                teste = {"distancia": "10.00 km", "duracao": "60 min", "trimp_semanal": "Normal ✅", "trimp_mensal": "Normal ✅"}
+                ok, res = enviar_notificacao_treino(teste, user['nome'], user.get('telefone'))
+                if ok: st.success("Mensagem enviada!")
+                else: st.error(f"Erro: {res}")
+
+        # Busca histórico
         res_treinos = supabase.table("atividades_fisicas").select("*").eq("id_atleta", user['id']).order("data_treino", desc=True).execute()
         
         if res_treinos.data:
             df = pd.DataFrame(res_treinos.data)
-            df['data_treino'] = pd.to_datetime(df['data_treino'])
+            
+            # --- CORREÇÃO DO ERRO DE DATETIME ---
+            df['data_treino'] = pd.to_datetime(df['data_treino']).dt.tz_localize(None)
+            agora = datetime.now()
 
-            c1, c2 = st.columns(2)
-            c1.metric("Treinos Realizados", len(df))
-            c2.metric("Km Total", f"{df['distancia'].sum():.1f}".replace('.', ',') + " km")
+            # --- LÓGICA DE ENVIO DO WHATSAPP ---
+            if st.session_state.get('just_synced'):
+                ultimo = df.iloc[0]
+                
+                # Cálculos reais sem erro de fuso horário
+                soma_7d = df[df['data_treino'] > (agora - timedelta(days=7))]['trimp_score'].sum()
+                soma_30d = df[df['data_treino'] > (agora - timedelta(days=30))]['trimp_score'].sum()
+                
+                status_w = "Ideal ✅" if soma_7d < 600 else "Cuidado ⚠️"
+                status_m = "Consistente ✅" if soma_30d > 1500 else "Baixo 📉"
+
+                dados_para_zap = {
+                    "distancia": f"{ultimo['distancia']:.2f} km",
+                    "duracao": f"{int(ultimo['duracao'])} min",
+                    "trimp_semanal": status_w,
+                    "trimp_mensal": status_m
+                }
+                
+                enviar_notificacao_treino(dados_para_zap, user['nome'], user.get('telefone'))
+                st.session_state['just_synced'] = False
+                st.toast("Treino enviado para o WhatsApp! 📲")
+
+            # Interface de métricas
+            m1, m2 = st.columns(2)
+            m1.metric("Treinos Registrados", len(df))
+            m2.metric("Kilometragem Total", f"{df['distancia'].sum():.1f} km".replace('.', ','))
             
-            st.markdown("### Últimas 10 Atividades")
-            df_tabela = df.head(10).copy()
-            df_tabela['Data do Treino'] = df_tabela['data_treino'].dt.strftime('%d-%m-%y')
-            df_tabela['Distância'] = df_tabela['distancia'].apply(lambda x: f"{x:.2f}".replace('.', ',') + " km")
-            df_tabela['Duração'] = df_tabela['duracao'].apply(lambda x: f"{int(x//60):02d}:{int(x%60):02d}")
-            
-            st_tabela = df_tabela[['Data do Treino', 'Distância', 'Duração', 'tipo_esporte', 'trimp_score']].style.set_properties(**{'text-align': 'center'}).set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
-            
-            # CORRIGIDO AQUI: width='stretch' na Tabela
-            st.dataframe(st_tabela, hide_index=True, width='stretch')
+            st.markdown("### 📅 Histórico Recente")
+            df_view = df.head(10).copy()
+            df_view['Data'] = df_view['data_treino'].dt.strftime('%d/%m/%Y')
+            st.dataframe(df_view[['Data', 'distancia', 'duracao', 'tipo_esporte', 'trimp_score']], use_container_width=True, hide_index=True)
 
             st.markdown("---")
-            col_graf1, col_graf2 = st.columns(2)
-            with col_graf1:
-                # CORRIGIDO AQUI: width='stretch' no Gráfico 1
-                st.plotly_chart(gerar_grafico_analise(df, "Análise Semanal", dias=7), width='stretch')
-            with col_graf2:
-                # CORRIGIDO AQUI: width='stretch' no Gráfico 2
-                st.plotly_chart(gerar_grafico_analise(df, "Análise Mensal", dias=30), width='stretch')
+            col_g1, col_g2 = st.columns(2)
+            fig_7 = gerar_grafico_analise(df, "Carga Semanal", dias=7)
+            fig_30 = gerar_grafico_analise(df, "Carga Mensal", dias=30)
+            
+            if fig_7: col_g1.plotly_chart(fig_7, use_container_width=True)
+            if fig_30: col_g2.plotly_chart(fig_30, use_container_width=True)
         else:
-            st.info("Sincronize seus treinos para começar!")
+            st.info("Sincronize seu Strava para visualizar os dados!")
 
     exibir_logo_rodape()

@@ -36,3 +36,41 @@ def verificar_necessidade_update(supabase, user):
     if not ultimo or (datetime.now() - datetime.fromisoformat(ultimo) > timedelta(hours=1)):
         return buscar_e_salvar_treinos(supabase, token, user["id"])
     return False
+
+def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta):
+    from twilio.rest import Client
+    import streamlit as st
+
+    # 1. Monta o texto EXATAMENTE como você pediu
+    # Lógica simples para definir status (você pode refinar as faixas depois)
+    status_semanal = "⚠️ Sobrecarga" if dados_treino['trimp_semanal'] > 150 else "✅ Ideal"
+    status_mensal = "⚠️ Sobrecarga" if dados_treino['trimp_mensal'] > 600 else "✅ Ideal"
+
+    mensagem = (
+        f"🏃‍♂️ *Treino Sincronizado*\n\n"
+        f"👤 Atleta: {nome_atleta}\n"
+        f"🚴 Atividade: {dados_treino['tipo']}\n"
+        f"📏 Distancia: {dados_treino['distancia']:.2f} km\n"
+        f"⏱️ Duração: {dados_treino['duracao']}\n"
+        f"📊 Trimp Semanal: {status_semanal}\n"
+        f"📅 Trimp Mensal: {status_mensal}"
+    )
+
+    # 2. Conecta no Twilio (usando seus secrets já configurados)
+    try:
+        sid = st.secrets["twilio"]["TWILIO_SID"].strip()
+        token = st.secrets["twilio"]["TWILIO_TOKEN"].strip()
+        from_number = f"whatsapp:+{st.secrets['twilio']['TWILIO_PHONE_NUMBER']}"
+        
+        # Garante formatação do número do aluno
+        to_number = f"whatsapp:{telefone_atleta}" if "whatsapp" not in telefone_atleta else telefone_atleta
+
+        client = Client(sid, token)
+        msg = client.messages.create(
+            body=mensagem,
+            from_=from_number,
+            to=to_number
+        )
+        return True, msg.sid
+    except Exception as e:
+        return False, str(e)

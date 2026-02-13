@@ -1,9 +1,54 @@
 import streamlit as st
 import pandas as pd
 import time
+import requests
+import uuid
 from datetime import datetime, date
+from twilio.rest import Client
 
-# --- FUNÇÕES ADMIN ---
+# ============================================================================
+# 🛠️ FUNÇÕES AUXILIARES (BACKEND)
+# ============================================================================
+def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta):
+    from twilio.rest import Client
+    import streamlit as st
+    try:
+        # 1. Busca credenciais
+        sid = st.secrets["twilio"]["TWILIO_SID"].strip()
+        token = st.secrets["twilio"]["TWILIO_TOKEN"].strip()
+        from_number = f"whatsapp:+{st.secrets['twilio']['TWILIO_PHONE_NUMBER']}"
+        
+        # 2. LIMPEZA RADICAL DO TELEFONE
+        # Remove tudo que não for número
+        import re
+        apenas_numeros = re.sub(r'\D', '', str(telefone_atleta))
+        
+        # Garante o +55 (Brasil) se o aluno esqueceu de digitar
+        if len(apenas_numeros) <= 11:
+            apenas_numeros = "55" + apenas_numeros
+        
+        to_number = f"whatsapp:+{apenas_numeros}"
+        
+        # DEBUG VISUAL (Apenas para você ver se o número está certo)
+        st.toast(f"Tentando enviar para: {to_number}")
+
+        client = Client(sid, token)
+        
+        corpo_msg = (
+            f"🏃‍♂️ *Treino Sincronizado*\n\n"
+            f"👤 Atleta: {nome_atleta}\n"
+            f"📏 Distância: {dados_treino['distancia']}\n"
+            f"⏱️ Duração: {dados_treino['duracao']}\n"
+            f"📊 TRIMP Semanal: {dados_treino['trimp_semanal']}\n" # Adicionado \n
+            f"📊 TRIMP Mensal: {dados_treino['trimp_mensal']}"
+        )
+        
+        msg = client.messages.create(body=corpo_msg, from_=from_number, to=to_number)
+        return True, msg.sid
+    except Exception as e:
+        st.error(f"❌ ERRO TWILIO: {str(e)}")
+        return False, str(e)
+
 def atualizar_data_vencimento(supabase, user_id, nova_data):
     try:
         supabase.table("usuarios_app").update({"data_vencimento": str(nova_data)}).eq("id", str(user_id)).execute()
@@ -27,7 +72,9 @@ def alternar_bloqueio(supabase, user_id, status_atual_bloqueado):
     except Exception as e:
         st.error(f"Erro no banco: {e}")
 
-# --- TELAS ---
+# ============================================================================
+# 🖥️ TELAS DO SISTEMA
+# ============================================================================
 
 def renderizar_tela_login(supabase_client):
     st.markdown("<br>", unsafe_allow_html=True)
@@ -69,13 +116,15 @@ def renderizar_tela_login(supabase_client):
             with st.form("form_cadastro"):
                 novo_nome = st.text_input("Nome Completo")
                 novo_email = st.text_input("E-mail")
-                novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="(00) 00000-0000")
+                novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="+5511999999999")
                 nova_senha = st.text_input("Defina uma Senha", type="password")
                 confirma_senha = st.text_input("Confirme a Senha", type="password")
+                
                 st.markdown("---")
                 st.markdown("### Termos e Privacidade")
                 st.caption("Ao clicar em aceitar, você concorda com os nossos Termos de Uso e Política de Privacidade (LGPD).")
                 aceite_termos = st.checkbox("Eu li e aceito os termos e condições.")
+                
                 botao_cadastrar = st.form_submit_button("Cadastrar", width='stretch')
                 
                 if botao_cadastrar:
@@ -99,116 +148,50 @@ def renderizar_tela_login(supabase_client):
                                 st.error("Erro ao cadastrar. E-mail já existe.")
 
 def renderizar_tela_admin(supabase_client):
-    import streamlit as st
-    import requests
-    from datetime import datetime, date
+    if "MP_ACCESS_TOKEN" in st.secrets:
+        st.sidebar.success("✅ Token MP detectado")
+    else:
+        st.sidebar.error("❌ Token MP não encontrado")
     
     st.title("Painel Administrativo 🔒")
 
-    # ===============================================================
-    # 🌟 RASTREADOR AUTOMÁTICO (CORREÇÃO DO CLIQUE DUPLO)
-    # ===============================================================
-    
-    # 1. Garante que a lista existe na memória logo no início
-    if 'notificacoes_fechadas' not in st.session_state:
-        st.session_state['notificacoes_fechadas'] = []
+    with st.expander("💬 Teste de Conexão WhatsApp"):
+        numero_destino = st.text_input("Número de Destino", value="+55")
+        if st.button("🚀 Enviar Teste"):
+            try:
+                sid = st.secrets["twilio"]["TWILIO_SID"].strip()
+                token = st.secrets["twilio"]["TWILIO_TOKEN"].strip()
+                from_num = f"whatsapp:+{st.secrets['twilio']['TWILIO_PHONE_NUMBER']}"
+                client = Client(sid, token)
+                msg = client.messages.create(body="🤖 Conexão V10.0 OK!", from_=from_num, to=f"whatsapp:{numero_destino}")
+                st.success(f"✅ Enviado! ID: {msg.sid}")
+            except Exception as e:
+                st.error(f"Erro: {e}")
 
-    # 2. Função auxiliar para fechar instantaneamente
-    def fechar_aviso(id_pix):
-        st.session_state['notificacoes_fechadas'].append(id_pix)
-
+    # --- LISTA DE ALUNOS E FINANCEIRO ---
     try:
-        token_mp = st.secrets.get("MP_ACCESS_TOKEN")
-        
-        if token_mp:
-            response = supabase_client.table("usuarios_app").select("id, nome, id_pagamento_mp").execute()
-            todos_alunos = response.data
-            alunos_com_pix = [aluno for aluno in todos_alunos if aluno.get('id_pagamento_mp')]
-
-            for aluno in alunos_com_pix:
-                mp_id = str(aluno['id_pagamento_mp']).strip()
-                
-                # Se já estiver na lista de fechados, pula fora antes de desenhar
-                if mp_id in st.session_state['notificacoes_fechadas']:
-                    continue
-                
-                if not mp_id or mp_id == "None": continue
-
-                url = f"https://api.mercadopago.com/v1/payments/{mp_id}"
-                headers = {"Authorization": f"Bearer {token_mp}"}
-                
-                try:
-                    res = requests.get(url, headers=headers).json()
-                    status_pagamento = res.get("status")
-                    
-                    if status_pagamento == "approved":
-                        with st.container(border=True):
-                            col_msg, col_close = st.columns([5, 1])
-                            
-                            with col_msg:
-                                st.success(f"💰 **PAGAMENTO CONFIRMADO:** O aluno(a) **{aluno['nome']}** pagou! Libere o acesso abaixo.")
-                            
-                            with col_close:
-                                # AQUI ESTÁ A CORREÇÃO MÁGICA: on_click
-                                st.button("✖️ Fechar", key=f"close_{mp_id}", on_click=fechar_aviso, args=(mp_id,))
-                except:
-                    pass
-    except Exception as e:
-        st.error(f"Erro no sistema de pagamentos: {e}")
-    # ===============================================================
-
-    st.markdown("### 📋 Controle de Alunos")
-
-    try:
-        res = supabase_client.table("usuarios_app").select("*").order("nome").execute()
-        users = res.data
-        
+        users = supabase_client.table("usuarios_app").select("*").order("nome").execute().data
         if users:
-            st.markdown("---")
-            c1, c2, c3 = st.columns([2, 1.5, 1.5])
-            c1.markdown("**Nome do Aluno**")
-            c2.markdown("**Data Expiração**")
-            c3.markdown("**Ação**")
-            st.markdown("---")
-
+            st.markdown("### 📋 Controle de Alunos")
             for user in users:
-                if user.get('is_admin'): continue 
-                
-                col_nome, col_data, col_acao = st.columns([2, 1.5, 1.5])
-                
-                with col_nome:
-                    st.write(f"👤 **{user['nome']}**")
+                if user.get('is_admin'): continue
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([2, 1.5, 1.5])
+                    c1.write(f"👤 **{user['nome']}**")
                     
-                with col_data:
-                    data_atual = user.get('data_vencimento')
-                    if data_atual:
-                        try: val_data = datetime.strptime(data_atual, '%Y-%m-%d').date()
-                        except: val_data = date.today()
-                    else: val_data = date.today()
+                    data_venc = user.get('data_vencimento') or str(date.today())
+                    nova_data = c2.date_input("Venc.", value=datetime.strptime(data_venc, '%Y-%m-%d').date(), key=f"d_{user['id']}")
+                    if str(nova_data) != data_venc:
+                        atualizar_data_vencimento(supabase_client, user['id'], nova_data)
                     
-                    nova_data = st.date_input("Vencimento", value=val_data, key=f"d_{user['id']}", label_visibility="collapsed")
-                    
-                    if str(nova_data) != str(data_atual) and data_atual is not None:
-                         atualizar_data_vencimento(supabase_client, user['id'], nova_data)
-                         
-                with col_acao:
-                    is_bloqueado = user.get('bloqueado', False)
-                    
-                    if is_bloqueado:
-                        if st.button("✅ Liberar", key=f"btn_a_{user['id']}"):
-                            supabase_client.table("usuarios_app").update({"id_pagamento_mp": None}).eq("id", user['id']).execute()
+                    if user.get('bloqueado'):
+                        if c3.button("✅ Liberar", key=f"lib_{user['id']}"):
                             alternar_bloqueio(supabase_client, user['id'], True)
-                            st.rerun()
                     else:
-                        if st.button("⛔ Bloquear", key=f"btn_b_{user['id']}", type="primary"):
+                        if c3.button("⛔ Bloquear", key=f"bloq_{user['id']}", type="primary"):
                             alternar_bloqueio(supabase_client, user['id'], False)
-                            st.rerun()
-                            
-                st.markdown("<hr style='margin: 5px 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
-        else:
-            st.info("Nenhum aluno cadastrado.")
     except Exception as e:
-        st.error(f"Erro ao carregar lista: {e}")
+        st.error(f"Erro ao carregar alunos: {e}")
 
 def renderizar_tela_bloqueio_financeiro():
     import streamlit as st
@@ -297,3 +280,45 @@ def renderizar_tela_bloqueio_financeiro():
                 st.error("Erro ao carregar a imagem do QR Code.")
 
         st.info("Após o pagamento, o sistema alertará o treinador automaticamente.")
+
+def renderizar_tela_aluno(supabase_client):
+    # 1. Marcação Visual de Topo
+    st.error("🚨 MODO DE TESTE ATIVADO - SE VOCÊ VÊ ISSO, O CÓDIGO ESTÁ RODANDO")
+    st.title(f"Olá, {st.session_state.user_info['nome']}! 🏃‍♂️")
+    
+    # 2. BOTÃO DE TESTE (Sem expander, sem colunas, direto na tela)
+    st.markdown("### 🛠️ TESTE DE WHATSAPP")
+    if st.button("🔴 CLIQUE AQUI PARA TESTAR WHATSAPP AGORA"):
+        dados_teste = {
+            "distancia": "10km", 
+            "duracao": "01:00", 
+            "trimp_semanal": "150"
+        }
+        nome = st.session_state.user_info.get('nome')
+        tel = st.session_state.user_info.get('telefone')
+        
+        ok, res = enviar_notificacao_treino(dados_teste, nome, tel)
+        
+        if ok: 
+            st.success(f"✅ SUCESSO! ID: {res}")
+        else:
+            st.error(f"❌ FALHA: {res}")
+    
+    st.markdown("---")
+
+    # 3. INTEGRAÇÃO STRAVA
+    try:
+        client_id = st.secrets.get("STRAVA_CLIENT_ID")
+        client_secret = st.secrets.get("STRAVA_CLIENT_SECRET")
+        redirect_uri = st.secrets.get("REDIRECT_URI", "http://localhost:8501")
+        
+        url_auth = f"https://www.strava.com/oauth/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&approval_prompt=force&scope=activity:read_all"
+        st.link_button("🟠 Sincronizar Strava", url_auth)
+    except Exception as e:
+        st.error(f"Erro Strava: {e}")
+
+    # Processamento do código Strava
+    code = st.query_params.get("code")
+    if code:
+        st.info("🔄 Sincronizando...")
+        # (Resto da lógica de sincronização que já temos...)
