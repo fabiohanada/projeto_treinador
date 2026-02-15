@@ -6,12 +6,14 @@ import requests
 from supabase import create_client
 from datetime import datetime, timedelta
 
-# Importação dos módulos
+# Importação dos módulos customizados
 from modules.ui import aplicar_estilo_css, exibir_logo_rodape, estilizar_botoes
 from modules.views import renderizar_tela_login, renderizar_tela_admin, renderizar_tela_bloqueio_financeiro, enviar_notificacao_treino
 
-# 1. CONFIGURAÇÕES INICIAIS
-st.set_page_config(page_title="Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
+# ============================================================================
+# 1. CONFIGURAÇÕES DE PÁGINA E CONEXÃO
+# ============================================================================
+st.set_page_config(page_title="DataPace - Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
 
 try:
     supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
@@ -22,7 +24,9 @@ except Exception as e:
 aplicar_estilo_css()
 estilizar_botoes()
 
-# 2. FUNÇÃO DE SINCRONIZAÇÃO (STRAVA -> SUPABASE)
+# ============================================================================
+# 2. LÓGICA DE SINCRONIZAÇÃO (STRAVA -> SUPABASE)
+# ============================================================================
 def processar_sincronizacao(auth_code, user_id):
     try:
         response = requests.post(
@@ -38,7 +42,7 @@ def processar_sincronizacao(auth_code, user_id):
         token = response.get('access_token')
         if token:
             headers = {'Authorization': f'Bearer {token}'}
-            # Busca últimas 5 atividades
+            # Busca as últimas 5 atividades para garantir que não perdeu nada
             atividades = requests.get("https://www.strava.com/api/v3/athlete/activities", 
                                       headers=headers, params={'per_page': 5}).json()
             
@@ -46,7 +50,7 @@ def processar_sincronizacao(auth_code, user_id):
                 if act['type'] in ['Run', 'VirtualRun', 'TrailRun', 'Ride', 'Walk']:
                     dist = act['distance'] / 1000
                     dur_minutos = act['moving_time'] / 60
-                    # Cálculo TRIMP simples
+                    # Cálculo de esforço TRIMP (Base v12.0)
                     trimp_calc = int(dur_minutos * 1.5)
                     
                     dados = {
@@ -58,6 +62,7 @@ def processar_sincronizacao(auth_code, user_id):
                         "data_treino": act['start_date_local'][:10],
                         "trimp_score": trimp_calc
                     }
+                    # Upsert evita duplicidade se o usuário sincronizar duas vezes
                     supabase.table("atividades_fisicas").upsert(dados, on_conflict="strava_id").execute()
             return True
         return False
@@ -65,13 +70,16 @@ def processar_sincronizacao(auth_code, user_id):
         st.error(f"Erro na sincronização: {e}")
         return False
 
-# 3. GESTÃO DE SESSÃO E LOGIN
+# ============================================================================
+# 3. GESTÃO DE SESSÃO E ROTEAMENTO OAUTH
+# ============================================================================
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
 q_params = st.query_params
 target_id = q_params.get("state") or q_params.get("session_id")
 
+# Se houver retorno do Strava (auth_code) ou sessão ativa na URL
 if not st.session_state.logado and target_id:
     res = supabase.table("usuarios_app").select("*").eq("id", target_id).execute()
     if res.data:
@@ -85,10 +93,12 @@ if not st.session_state.logado and target_id:
             st.query_params["session_id"] = target_id
             st.rerun()
 
-# 4. FUNÇÃO GRÁFICOS (COM CORREÇÃO DE DATA)
+# ============================================================================
+# 4. FUNÇÃO DE GRÁFICOS (ANALÍTICO)
+# ============================================================================
 def gerar_grafico_analise(df, titulo, dias=7):
-    # Remove fuso horário para evitar erro
     df_temp = df.copy()
+    # Tratamento de Timezone para o Plotly não quebrar
     df_temp['data_treino'] = pd.to_datetime(df_temp['data_treino']).dt.tz_localize(None)
     
     hoje = datetime.now()
@@ -98,67 +108,72 @@ def gerar_grafico_analise(df, titulo, dias=7):
     if df_filtrado.empty: return None
     
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(go.Bar(x=df_filtrado['data_treino'], y=df_filtrado['distancia'], name="Km", marker_color='lightgrey', opacity=0.5), secondary_y=True)
-    fig.add_trace(go.Scatter(x=df_filtrado['data_treino'], y=df_filtrado['trimp_score'], name="TRIMP", mode='lines+markers', line=dict(color='#FC4C02', width=3)), secondary_y=False)
+    # Barras de Distância
+    fig.add_trace(go.Bar(x=df_filtrado['data_treino'], y=df_filtrado['distancia'], 
+                         name="Km", marker_color='lightgrey', opacity=0.5), secondary_y=True)
+    # Linha de Esforço (TRIMP)
+    fig.add_trace(go.Scatter(x=df_filtrado['data_treino'], y=df_filtrado['trimp_score'], 
+                             name="TRIMP", mode='lines+markers', line=dict(color='#FC4C02', width=3)), secondary_y=False)
     
     fig.update_layout(title_text=titulo, template="plotly_white", hovermode="x unified", showlegend=False, height=400)
     fig.update_yaxes(title_text="Esforço", secondary_y=False)
     fig.update_yaxes(title_text="Km", secondary_y=True, showgrid=False)
     return fig
 
-# 5. LÓGICA DE TELAS (ROTEAMENTO OFICIAL)
+# ============================================================================
+# 5. CONTROLE DE TELAS (ORDEM DE PRIORIDADE)
+# ============================================================================
+
+# TELA 1: LOGIN (Se não estiver logado)
 if not st.session_state.logado:
     renderizar_tela_login(supabase)
+
 else:
     user = st.session_state.user_info
     
+    # --- BARRA LATERAL (SIDEBAR) ---
     with st.sidebar:
-        st.markdown(f"### Fábio Assessoria")
+        st.markdown(f"### DataPace Analytics")
         st.write(f"👤 **{user['nome']}**")
         
-        # Só mostra botão Strava se estiver ativo e pagante
+        # Só habilita sincronização se o usuário não estiver bloqueado
         is_ativo = not user.get('bloqueado') and user.get('status_pagamento') != False
         if is_ativo:
             client_id = st.secrets.get('STRAVA_CLIENT_ID')
-            redirect_uri = st.secrets.get("REDIRECT_URI", "http://localhost:8501")
+            redirect_uri = st.secrets.get("REDIRECT_URI")
             link_strava = f"https://www.strava.com/oauth/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
             
             st.markdown(f'''<a href="{link_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">🔄 Sincronizar Strava</button></a>''', unsafe_allow_html=True)
 
         st.markdown("---")
-        if st.button("Sair", type="secondary", use_container_width=True):
+        if st.button("Sair da Conta", type="secondary", use_container_width=True):
             st.session_state.clear()
             st.query_params.clear()
             st.rerun()
 
-    # --- VERIFICAÇÕES DE BLOQUEIO ---
+    # TELA 2: PAINEL ADMIN (Se for administrador)
     if user.get('is_admin'):
         renderizar_tela_admin(supabase)
         
+    # TELA 3: BLOQUEIO FINANCEIRO (Se estiver bloqueado ou sem pagamento)
     elif user.get('bloqueado') or user.get('status_pagamento') == False:
         renderizar_tela_bloqueio_financeiro()
         
+    # TELA 4: DASHBOARD DO ALUNO (Fluxo normal)
     else:
-        # --- TELA DO ALUNO ---
         st.title(f"Olá, {user['nome'].split()[0]}! 🏃‍♂️")
 
-        # --- AQUI ESTAVA O BOTÃO DE TESTE (REMOVIDO) ---
-
-        # DADOS DO BANCO
+        # Busca dados no Supabase
         res_treinos = supabase.table("atividades_fisicas").select("*").eq("id_atleta", user['id']).order("data_treino", desc=True).execute()
         
         if res_treinos.data:
             df = pd.DataFrame(res_treinos.data)
-            
-            # --- CORREÇÃO DO FUSO HORÁRIO ---
             df['data_treino'] = pd.to_datetime(df['data_treino']).dt.tz_localize(None)
             agora = datetime.now()
 
-            # --- LÓGICA DE DISPARO DO WHATSAPP ---
+            # --- DISPARO AUTOMÁTICO WHATSAPP (PÓS-SINCRONIZAÇÃO) ---
             if st.session_state.get('just_synced'):
                 ultimo = df.iloc[0]
-                
-                # Cálculos
                 soma_7d = df[df['data_treino'] > (agora - timedelta(days=7))]['trimp_score'].sum()
                 soma_30d = df[df['data_treino'] > (agora - timedelta(days=30))]['trimp_score'].sum()
                 
@@ -174,25 +189,31 @@ else:
                 
                 enviar_notificacao_treino(dados_zap, user['nome'], user.get('telefone'))
                 st.session_state['just_synced'] = False
-                st.toast("Notificação enviada!", icon="📲")
+                st.toast("Notificação enviada ao WhatsApp!", icon="📲")
 
-            # Interface Normal
-            m1, m2 = st.columns(2)
-            m1.metric("Treinos", len(df))
-            m2.metric("Km Total", f"{df['distancia'].sum():.1f} km")
+            # --- INTERFACE DE MÉTRICAS ---
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total de Treinos", len(df))
+            m2.metric("Distância Total", f"{df['distancia'].sum():.1f} km")
+            m3.metric("Média de Esforço", f"{int(df['trimp_score'].mean())} pts")
             
-            st.markdown("### Histórico")
+            st.markdown("### 📋 Histórico Recente")
             df_show = df.head(10).copy()
             df_show['Data'] = df_show['data_treino'].dt.strftime('%d/%m/%Y')
-            st.dataframe(df_show[['Data', 'distancia', 'duracao', 'trimp_score']], use_container_width=True, hide_index=True)
+            st.dataframe(df_show[['Data', 'distancia', 'duracao', 'trimp_score']], 
+                         use_container_width=True, hide_index=True)
 
+            st.markdown("### 📊 Análise de Carga")
             col1, col2 = st.columns(2)
-            fig1 = gerar_grafico_analise(df, "Semanal", 7)
-            fig2 = gerar_grafico_analise(df, "Mensal", 30)
+            fig1 = gerar_grafico_analise(df, "Volume vs Esforço (7 dias)", 7)
+            fig2 = gerar_grafico_analise(df, "Consistência Mensal (30 dias)", 30)
             if fig1: col1.plotly_chart(fig1, use_container_width=True)
             if fig2: col2.plotly_chart(fig2, use_container_width=True)
             
         else:
-            st.info("Sincronize seu Strava para ver seus dados.")
+            st.info("Bem-vindo! Sincronize seu Strava no menu lateral para carregar seus treinos.")
 
-    exibir_logo_rodape()
+# ============================================================================
+# 6. RODAPÉ JURÍDICO (APARECE EM TODAS AS TELAS)
+# ============================================================================
+exibir_logo_rodape()
