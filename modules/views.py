@@ -7,6 +7,65 @@ from datetime import datetime, date
 from twilio.rest import Client
 import re
 from supabase import create_client
+import os
+
+# ============================================================================
+# 🎨 ESTILIZAÇÃO (CSS CORRIGIDO - V17.1)
+# ============================================================================
+
+def aplicar_estilo_customizado():
+    st.markdown("""
+        <style>
+        /* CORREÇÃO 3: SUBIR TUDO (Margem negativa no topo) */
+        .main .block-container {
+            margin-top: -80px; /* Aprox. 2cm para cima */
+            padding-top: 1rem;
+        }
+
+        /* CORREÇÃO 1: CENTRALIZAÇÃO ABSOLUTA DA LOGO */
+        [data-testid="stImage"] {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+        }
+        
+        [data-testid="stImage"] > img {
+            margin: 0 auto !important;
+            max-width: 100%;
+        }
+
+        /* CORREÇÃO 2: REMOVER VERDE E PADRONIZAR BOTÕES */
+        /* Botão principal (Entrar/Cadastrar) em Laranja */
+        div.stButton > button:first-child {
+            background-color: #FC4C02 !important;
+            color: white !important;
+            border: none !important;
+            width: 100%;
+            font-weight: bold;
+            border-radius: 8px;
+            padding: 0.6rem;
+            margin-top: 10px;
+        }
+
+        /* Abas (Tabs) limpas - Sem fundo verde */
+        .stTabs [data-baseweb="tab-list"] {
+            justify-content: center; /* Centraliza as abas */
+            gap: 20px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            background-color: transparent !important;
+            border: none !important;
+        }
+        .stTabs [aria-selected="true"] {
+            color: #FC4C02 !important; /* Texto laranja quando ativo */
+            border-bottom: 2px solid #FC4C02 !important; /* Linha laranja */
+        }
+        .stTabs [aria-selected="false"] {
+            color: #666 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
 # ============================================================================
 # 🛠️ FUNÇÃO DE ENVIO DO WHATSAPP
@@ -30,7 +89,7 @@ def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta):
         
         # CORPO DA MENSAGEM (FORMATO PADRÃO)
         corpo_msg = (
-            f"🏃‍♂️ *Treino Sincronizado*\n\n"
+            f"🤖 *Zaptreino: Treino Sincronizado*\n\n"
             f"👤 Atleta: {nome_atleta}\n"
             f"📏 Distância: {dados_treino['distancia']}\n"
             f"⏱️ Duração: {dados_treino['duracao']}\n"
@@ -72,22 +131,24 @@ def alternar_bloqueio(supabase, user_id, status_atual_bloqueado):
 # ============================================================================
 
 def renderizar_tela_login(supabase_client):
-    # Apenas o botão de submit (Cadastrar) será laranja
-    st.markdown("""
-        <style>
-        div.stButton > button:first-child {
-            background-color: #FC4C02 !important;
-            color: white !important;
-            border: none !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 2, 1])
+    aplicar_estilo_customizado()
+    
+    # Ajuste das colunas para centralizar
+    c1, c2, c3 = st.columns([1, 1.5, 1])
     
     with c2:
-        st.markdown("<h2 style='text-align: center; color: #FC4C02;'>Área do Atleta</h2>", unsafe_allow_html=True)
+        # --- CABEÇALHO CENTRALIZADO ---
+        st.markdown('<div style="text-align: center; width: 100%;">', unsafe_allow_html=True)
+        
+        # Exibe a logo
+        st.image("assets/logo_zaptreino.png", width=350)
+        
+        # Subtítulo ajustado
+        st.markdown('<h3 style="color: #666; font-size: 20px; margin-top: -15px; font-weight: normal;">Conecte seu movimento</h3>', unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
         aba_login, aba_cadastro = st.tabs(["Fazer Login", "Criar Conta"])
         
         with aba_login:
@@ -162,19 +223,22 @@ def renderizar_tela_login(supabase_client):
                                 "aceite_lgpd": True
                             }
                             try:
-                                supabase_client.table("usuarios_app").insert(dados).execute()
-                                st.balloons()
-                                st.success("✅ Conta criada com sucesso! Faça seu login.")
-                            except Exception as e:
-                                if "already exists" in str(e).lower():
+                                # Verificação manual de e-mail duplicado para mensagem amigável
+                                check = supabase_client.table("usuarios_app").select("id").eq("email", novo_email).execute()
+                                if check.data:
                                     st.error("📧 Este e-mail já está cadastrado.")
                                 else:
-                                    st.error(f"❌ Erro ao cadastrar. Verifique o banco de dados.")
+                                    dados["id"] = str(uuid.uuid4())
+                                    supabase_client.table("usuarios_app").insert(dados).execute()
+                                    st.balloons()
+                                    st.success("✅ Conta criada com sucesso! Faça seu login.")
+                            except Exception as e:
+                                st.error(f"Erro ao cadastrar: {e}")
 
 def renderizar_tela_admin(supabase_client):
     st.title("Painel Administrativo 🔒")
     
-    # --- RASTREADOR DE PAGAMENTOS (MANTIDO IGUAL) ---
+    # --- RASTREADOR DE PAGAMENTOS ---
     try:
         token_mp = st.secrets.get("MP_ACCESS_TOKEN")
         if token_mp:
@@ -200,21 +264,16 @@ def renderizar_tela_admin(supabase_client):
             for user in users:
                 if user.get('is_admin'): continue # Pula o admin
                 
-                # O container visual principal (MANTIDO)
                 with st.container(border=True):
-                    # Layout original das colunas
                     c1, c2, c3 = st.columns([2, 1.5, 1.5])
                     
-                    # Coluna 1: Nome (Visualização)
                     c1.write(f"👤 **{user['nome']}**")
                     
-                    # Coluna 2: Vencimento (Funcionalidade existente)
                     data_venc = user.get('data_vencimento') or str(date.today())
                     nova_data = c2.date_input("Venc.", value=datetime.strptime(data_venc, '%Y-%m-%d').date(), key=f"d_{user['id']}", label_visibility="collapsed")
                     if str(nova_data) != data_venc:
                         atualizar_data_vencimento(supabase_client, user['id'], nova_data)
                     
-                    # Coluna 3: Botão de Bloqueio (Funcionalidade existente)
                     if user.get('bloqueado'):
                         if c3.button("✅ Liberar", key=f"lib_{user['id']}"):
                             supabase_client.table("usuarios_app").update({"id_pagamento_mp": None}).eq("id", user['id']).execute()
@@ -223,11 +282,8 @@ def renderizar_tela_admin(supabase_client):
                         if c3.button("⛔ Bloquear", key=f"bloq_{user['id']}", type="primary"):
                             alternar_bloqueio(supabase_client, user['id'], False)
 
-                    # --- NOVIDADE: ÁREA DE EDIÇÃO E EXCLUSÃO (ESCONDIDA) ---
-                    # Usamos um expander para não poluir o layout principal
+                    # --- ÁREA DE EDIÇÃO E EXCLUSÃO ---
                     with st.expander("⚙️ Editar / Excluir"):
-                        
-                        # Formulário de Edição
                         with st.form(key=f"form_edit_{user['id']}"):
                             st.caption("Editar Dados Cadastrais")
                             col_e1, col_e2 = st.columns(2)
@@ -250,14 +306,11 @@ def renderizar_tela_admin(supabase_client):
 
                         st.markdown("---")
                         
-                        # Área de Exclusão (Zona de Perigo)
                         col_del_txt, col_del_btn = st.columns([3, 1])
                         col_del_txt.warning("⚠️ **Zona de Perigo:** A exclusão é irreversível.")
                         
-                        # Botão de Excluir separado para evitar clique acidental
                         if col_del_btn.button("🗑️ Excluir", key=f"del_btn_{user['id']}", type="primary"):
                             try:
-                                # Deleta o usuário pelo ID
                                 supabase_client.table("usuarios_app").delete().eq("id", user['id']).execute()
                                 st.success(f"Usuário {user['nome']} removido!")
                                 time.sleep(1)
@@ -338,21 +391,20 @@ def renderizar_tela_bloqueio_financeiro():
 def renderizar_edicao_perfil(supabase_client, user):
     """
     Renderiza um formulário retrátil para o atleta editar seus próprios dados.
-    Deve ser colocado acima do botão do Strava.
     """
-    # Expander para não ocupar espaço visual se não for usado
     with st.expander("⚙️ Editar Meus Dados / Senha", expanded=False):
         with st.form(key="form_edit_proprio_perfil"):
             c1, c2 = st.columns(2)
             
-            # Campos preenchidos com os dados atuais
             novo_nome = c1.text_input("Nome", value=user.get('nome', ''))
             novo_tel = c2.text_input("WhatsApp", value=user.get('telefone', ''))
             
-            # Tratamento da data (para não dar erro se for None)
             data_atual = user.get('data_nascimento')
             if data_atual:
-                val_data = datetime.strptime(str(data_atual), '%Y-%m-%d').date()
+                try:
+                    val_data = datetime.strptime(str(data_atual), '%Y-%m-%d').date()
+                except:
+                    val_data = date(1990, 1, 1)
             else:
                 val_data = date(1990, 1, 1)
                 
@@ -366,16 +418,13 @@ def renderizar_edicao_perfil(supabase_client, user):
                     "data_nascimento": str(nova_data)
                 }
                 
-                # Só atualiza a senha se o usuário digitou algo novo
                 if nova_senha:
                     dados_update["senha"] = nova_senha
                 
                 try:
                     supabase_client.table("usuarios_app").update(dados_update).eq("id", user['id']).execute()
                     
-                    # Atualiza a sessão local para refletir a mudança imediatamente
                     st.session_state.user_info.update(dados_update)
-                    
                     st.toast("Perfil atualizado com sucesso!", icon="✅")
                     time.sleep(1)
                     st.rerun()

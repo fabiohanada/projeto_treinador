@@ -14,7 +14,7 @@ from modules.views import renderizar_tela_login, renderizar_tela_admin, renderiz
 # ============================================================================
 # 1. CONFIGURAÇÕES DE PÁGINA E CONEXÃO
 # ============================================================================
-st.set_page_config(page_title="DataPace - Fábio Assessoria", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Zaptreino - Conecte seu movimento", layout="wide", page_icon="🏃‍♂️")
 
 try:
     supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
