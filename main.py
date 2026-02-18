@@ -52,22 +52,17 @@ def calcular_trimp_banister(duracao_min, fc_media, fc_max, fc_repouso=60):
 
 def processar_sincronizacao(auth_code, user_id):
     try:
-        # 1. BUSCA A IDADE DO ATLETA NO BANCO
+        # 1. Busca idade (Mantido igual)
         user_data = supabase.table("usuarios_app").select("data_nascimento").eq("id", user_id).execute()
-        
-        fc_max_atleta = 190 
+        fc_max_atleta = 190
         
         if user_data.data and user_data.data[0].get('data_nascimento'):
-            nasc_str = user_data.data[0]['data_nascimento']
             try:
-                ano_nasc = int(nasc_str.split('-')[0])
-                ano_atual = datetime.now().year
-                idade = ano_atual - ano_nasc
-                fc_max_atleta = 220 - idade
-            except:
-                pass 
+                ano_nasc = int(user_data.data[0]['data_nascimento'].split('-')[0])
+                fc_max_atleta = 220 - (datetime.now().year - ano_nasc)
+            except: pass
             
-        # 2. TROCA O CÓDIGO PELO TOKEN DO STRAVA
+        # 2. Troca Code por Token
         response = requests.post(
             "https://www.strava.com/api/v3/oauth/token",
             data={
@@ -80,7 +75,21 @@ def processar_sincronizacao(auth_code, user_id):
         
         token = response.get('access_token')
         
-        # 3. IMPORTA E PROCESSA OS TREINOS
+        # --- NOVIDADE V16.0: SALVAR O TOKEN NO BANCO PARA O ROBÔ USAR DEPOIS ---
+        if token:
+            dados_token = {
+                "user_id": user_id,
+                "athlete_id": response.get('athlete', {}).get('id'),
+                "access_token": token,
+                "refresh_token": response.get('refresh_token'),
+                "expires_at": response.get('expires_at'),
+                "updated_at": str(datetime.now())
+            }
+            # Salva na tabela nova que acabamos de criar
+            supabase.table("auth_strava").upsert(dados_token).execute()
+        # -----------------------------------------------------------------------
+        
+        # 3. Importa treinos (Mantido igual)
         if token:
             headers = {'Authorization': f'Bearer {token}'}
             atividades = requests.get("https://www.strava.com/api/v3/athlete/activities", 
@@ -88,12 +97,10 @@ def processar_sincronizacao(auth_code, user_id):
             
             for act in atividades:
                 if act['type'] in ['Run', 'VirtualRun', 'TrailRun', 'Ride', 'Walk', 'WeightTraining', 'Workout']:
-                    
                     dist = act.get('distance', 0) / 1000
                     dur_minutos = act.get('moving_time', 0) / 60
                     fc_media_treino = act.get('average_heartrate', 0)
                     
-                    # CÁLCULO CIENTÍFICO
                     trimp_real = calcular_trimp_banister(dur_minutos, fc_media_treino, fc_max_atleta)
                     
                     dados = {
@@ -103,10 +110,9 @@ def processar_sincronizacao(auth_code, user_id):
                         "distancia": dist,
                         "duracao": int(dur_minutos),
                         "data_treino": act['start_date_local'][:10],
-                        "name": act.get('name', 'Treino sem nome'),
+                        "name": act.get('name', 'Treino'),
                         "trimp_score": trimp_real 
                     }
-                    
                     supabase.table("atividades_fisicas").upsert(dados, on_conflict="strava_id").execute()
             return True
         return False

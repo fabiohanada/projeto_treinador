@@ -1,117 +1,164 @@
 import time
 import requests
+import pandas as pd
+from datetime import datetime, timedelta
 import math
-from supabase import create_client, Client
+from supabase import create_client
+from twilio.rest import Client # <--- Importante: Instale com 'pip install twilio' se der erro
+import os
 
-# --- CONFIGURAÇÕES DA API (MANTIDAS) ---
-CLIENT_ID = '197487' 
-CLIENT_SECRET = '2d7e380d8348b5ea2a8e4adf64fdcd69b2ef116f'
-REFRESH_TOKEN = '66d330e7bbc52f701ca02fc4192b2975269120f8' 
+# ============================================================================
+# 🔐 CONFIGURAÇÕES DE CREDENCIAIS (PREENCHA AQUI)
+# ============================================================================
+# Copie esses valores do seu arquivo .streamlit/secrets.toml
 
+# 1. SUPABASE
 SUPABASE_URL = 'https://gddseopytaabdxmgubzc.supabase.co'
-SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdkZHNlb3B5dGFhYmR4bWd1YnpjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTExNjk2MSwiZXhwIjoyMDg0NjkyOTYxfQ.8R_j1Zg3JB0_VXViRAzYndYmsHJAIyCZN2v3qwk45-4' 
+SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdkZHNlb3B5dGFhYmR4bWd1YnpjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTExNjk2MSwiZXhwIjoyMDg0NjkyOTYxfQ.8R_j1Zg3JB0_VXViRAzYndYmsHJAIyCZN2v3qwk45-4'
 
-# --- FUNÇÃO DE CÁLCULO TRIMP DINÂMICO ---
-def calcular_trimp_personalizado(duracao_minutos, fc_media, fc_max, fc_rep, genero='masculino'):
-    if not fc_media or fc_media == 0 or not fc_max or not fc_rep:
-        return 0
+# 2. TWILIO (WHATSAPP)
+TWILIO_SID = "ACa4021ac5afa057dcfcfdd0126fbfaa2e"
+TWILIO_TOKEN = "18ee37a12b39555c915fcfe3f914390e"
+TWILIO_PHONE_FROM = "whatsapp:+14155238886" # Ou o seu número oficial
+
+# ============================================================================
+
+# Conexão com Supabase
+try:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+except:
+    print("⚠️ ERRO: Configure as credenciais do Supabase no topo do arquivo!")
+    exit()
+
+def calcular_trimp_banister(duracao_min, fc_media, fc_max, fc_repouso=60):
+    """ Cálculo Científico de TRIMP (Banister) """
+    if not fc_media or fc_media <= 0:
+        return int(duracao_min * 1.5)
+        
+    if fc_max <= fc_repouso: fc_max = 190
+    b = 1.92
+    reserva = (fc_media - fc_repouso) / (fc_max - fc_repouso)
     
-    # Intensidade Relativa (HRR)
-    hr_r = (fc_media - fc_rep) / (fc_max - fc_rep)
+    try:
+        trimp = duracao_min * reserva * 0.64 * math.exp(b * reserva)
+        return int(trimp)
+    except:
+        return int(duracao_min * 1.5)
+
+def buscar_fc_maxima(atleta_id):
+    try:
+        res = supabase.table("usuarios_app").select("data_nascimento").eq("id", atleta_id).execute()
+        if res.data and res.data[0].get('data_nascimento'):
+            nasc_str = res.data[0]['data_nascimento']
+            ano_nasc = int(nasc_str.split('-')[0])
+            idade = datetime.now().year - ano_nasc
+            return 220 - idade
+    except:
+        pass
+    return 190
+
+def enviar_whatsapp_robo(dados, telefone):
+    try:
+        print(f"📲 Tentando enviar para {telefone}...")
+        
+        # Limpeza do telefone (Garanta o +55)
+        import re
+        apenas_numeros = re.sub(r'\D', '', str(telefone))
+        if len(apenas_numeros) <= 11: # Se for ex: 11999999999 vira 5511999999999
+            apenas_numeros = "55" + apenas_numeros
+            
+        to_number = f"whatsapp:+{apenas_numeros}"
+        
+        # Conexão Twilio
+        client = Client(TWILIO_SID, TWILIO_TOKEN)
+        
+        corpo_msg = (
+            f"🤖 *Novo Treino Detectado!*\n\n"
+            f"🏃‍♂️ {dados['name']}\n"
+            f"📏 {dados['distancia']:.2f} km\n"
+            f"⏱️ {dados['duracao']} min\n"
+            f"❤️ Carga (TRIMP): *{dados['trimp_score']}*"
+        )
+        
+        msg = client.messages.create(
+            body=corpo_msg,
+            from_=TWILIO_PHONE_FROM,
+            to=to_number
+        )
+        print(f"✅ Sucesso! Message SID: {msg.sid}")
+        return True
+    except Exception as e:
+        print(f"❌ Erro ao enviar Zap: {e}")
+        return False
+
+def processar_novos_treinos():
+    print("🤖 Robô v16.0 escaneando Strava...")
     
-    # Ajuste da constante por gênero (Fórmula de Banister)
-    # Masculino: 1.92 | Feminino: 1.67
-    k = 1.92 if genero.lower() == 'masculino' else 1.67
-    
-    trimp = duracao_minutos * hr_r * 0.64 * math.exp(k * hr_r)
-    return int(trimp)
-
-def get_strava_token():
-    response = requests.post(
-        'https://www.strava.com/oauth/token',
-        data={'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET, 
-              'refresh_token': REFRESH_TOKEN, 'grant_type': 'refresh_token'}
-    )
-    return response.json().get('access_token') if response.status_code == 200 else None
-
-def main():
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("🤖 Robô v15.0 - Processamento Inteligente Iniciado...")
-
-    # 1. Buscar avisos pendentes
-    eventos = supabase.table('webhook_events').select('*').eq('processed', False).execute().data
-    
-    if not eventos:
-        print("💤 Fila vazia.")
-        return
-
-    access_token = get_strava_token()
-    if not access_token: return
-
-    for evento in eventos:
-        data = evento['event_data']
-        strava_id = data.get('object_id')
-        atleta_strava_id = data.get('owner_id') # ID do aluno no Strava
-
-        if data.get('aspect_type') == 'create' and data.get('object_type') == 'activity':
-            print(f"--> Processando treino {strava_id} do atleta {atleta_strava_id}...")
+    try:
+        # Busca tokens salvos
+        usuarios = supabase.table("auth_strava").select("*").execute().data
+        
+        for u in usuarios:
+            user_id = u['user_id']
+            token = u['access_token']
             
-            # 2. BUSCAR PERFIL DO ALUNO NO BANCO
-            perfil = supabase.table('perfis_atletas').select('*').eq('strava_athlete_id', atleta_strava_id).execute().data
+            # (Opcional) Aqui entraria a lógica de renovar token se expires_at < agora
             
-            # Valores padrão caso o aluno não tenha configurado o perfil ainda
-            fc_max, fc_rep, genero, id_atleta_interno = 190, 60, 'masculino', None
+            headers = {'Authorization': f'Bearer {token}'}
             
-            if perfil:
-                p = perfil[0]
-                fc_max = p.get('fc_maxima', 190)
-                fc_rep = p.get('fc_repouso', 60)
-                genero = p.get('genero', 'masculino')
-                id_atleta_interno = p.get('id_atleta')
-            else:
-                # Se não achamos perfil pelo ID do Strava, tentamos achar o dono da conta
-                print(f"⚠️ Perfil não configurado para o atleta {atleta_strava_id}. Usando padrões.")
-
-            # 3. BUSCAR DADOS NO STRAVA
-            headers = {'Authorization': f'Bearer {access_token}'}
-            r_strava = requests.get(f'https://www.strava.com/api/v3/activities/{strava_id}', headers=headers)
+            # Pega atividades de hoje e ontem (para não pegar histórico muito antigo)
+            after_date = int((datetime.now() - timedelta(days=2)).timestamp())
             
-            if r_strava.status_code == 200:
-                treino = r_strava.json()
-                dur_min = treino['moving_time'] / 60
+            try:
+                url = f"https://www.strava.com/api/v3/athlete/activities?after={after_date}"
+                atividades = requests.get(url, headers=headers).json()
                 
-                # --- LÓGICA DE VALOR PADRÃO (v15.1) ---
-                # Pegamos o batimento real do Strava
-                fc_media_bruta = treino.get('average_heartrate', 0)
+                if isinstance(atividades, list):
+                    fc_max_real = buscar_fc_maxima(user_id)
+                    
+                    for act in atividades:
+                        strava_id = str(act['id'])
+                        
+                        # Verifica duplicidade
+                        existe = supabase.table("atividades_fisicas").select("id").eq("strava_id", strava_id).execute()
+                        
+                        if not existe.data:
+                            print(f"⚡ Processando: {act['name']}")
+                            
+                            dist = act.get('distance', 0) / 1000
+                            dur_min = act.get('moving_time', 0) / 60
+                            fc_med = act.get('average_heartrate', 0)
+                            
+                            trimp = calcular_trimp_banister(dur_min, fc_med, fc_max_real)
+                            
+                            novo_treino = {
+                                "id_atleta": user_id,
+                                "strava_id": strava_id,
+                                "tipo_esporte": act['type'],
+                                "distancia": dist,
+                                "duracao": int(dur_min),
+                                "data_treino": act['start_date_local'][:10],
+                                "name": act.get('name', 'Treino'),
+                                "trimp_score": trimp
+                            }
+                            
+                            # Salva no banco
+                            supabase.table("atividades_fisicas").insert(novo_treino).execute()
+                            
+                            # Busca telefone e envia
+                            user_info = supabase.table("usuarios_app").select("telefone").eq("id", user_id).execute()
+                            if user_info.data:
+                                fone = user_info.data[0].get('telefone')
+                                if fone:
+                                    enviar_whatsapp_robo(novo_treino, fone)
+            except Exception as e_req:
+                print(f"Erro na requisição Strava: {e_req}")
                 
-                # Se for 0 (sem relógio), forçamos 130 bpm para o aluno não ficar sem TRIMP
-                if fc_media_bruta == 0:
-                    fc_media = 130
-                    print(f"   ℹ️ Atleta sem relógio. Usando padrão comercial: {fc_media} bpm")
-                else:
-                    fc_media = fc_media_bruta
-                    print(f"   ❤️ FC Média real detectada: {fc_media} bpm")
-                
-                # CÁLCULO PERSONALIZADO (usando os 130 fixos ou a FC real)
-                trimp = calcular_trimp_personalizado(dur_min, fc_media, fc_max, fc_rep, genero)
-                
-                # SALVAR NA TABELA OFICIAL (UPSERT)
-                novo_treino = {
-                    'strava_id': str(treino['id']),
-                    'id_atleta': id_atleta_interno,
-                    'data_treino': treino['start_date'],
-                    'tipo_esporte': treino['type'],
-                    'distancia': treino['distance'] / 1000,
-                    'duracao': int(dur_min),
-                    'trimp_score': trimp,
-                    'name': treino['name']
-                }
-                
-                supabase.table('atividades_fisicas').upsert(novo_treino, on_conflict='strava_id').execute()
-                print(f"✅ Treino '{treino['name']}' processado com TRIMP {trimp}!")
-            
-        # Marcar evento como lido
-        supabase.table('webhook_events').update({'processed': True}).eq('id', evento['id']).execute()
+    except Exception as e:
+        print(f"Erro geral no loop: {e}")
 
 if __name__ == "__main__":
-    main()
+    while True:
+        processar_novos_treinos()
+        print("💤 Dormindo 5 minutos...") # Rápido para teste
+        time.sleep(300)
