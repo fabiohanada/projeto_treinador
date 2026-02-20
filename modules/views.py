@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 import time
 import requests
 import uuid
@@ -7,87 +6,25 @@ from datetime import datetime, date
 from twilio.rest import Client
 import re
 from supabase import create_client
-import os
 
 # ============================================================================
-# 🎨 ESTILIZAÇÃO (CSS CORRIGIDO - V17.1)
-# ============================================================================
-
-def aplicar_estilo_customizado():
-    st.markdown("""
-        <style>
-        /* CORREÇÃO 3: SUBIR TUDO (Margem negativa no topo) */
-        .main .block-container {
-            margin-top: -80px; /* Aprox. 2cm para cima */
-            padding-top: 1rem;
-        }
-
-        /* CORREÇÃO 1: CENTRALIZAÇÃO ABSOLUTA DA LOGO */
-        [data-testid="stImage"] {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            width: 100%;
-        }
-        
-        [data-testid="stImage"] > img {
-            margin: 0 auto !important;
-            max-width: 100%;
-        }
-
-        /* CORREÇÃO 2: REMOVER VERDE E PADRONIZAR BOTÕES */
-        /* Botão principal (Entrar/Cadastrar) em Laranja */
-        div.stButton > button:first-child {
-            background-color: #FC4C02 !important;
-            color: white !important;
-            border: none !important;
-            width: 100%;
-            font-weight: bold;
-            border-radius: 8px;
-            padding: 0.6rem;
-            margin-top: 10px;
-        }
-
-        /* Abas (Tabs) limpas - Sem fundo verde */
-        .stTabs [data-baseweb="tab-list"] {
-            justify-content: center; /* Centraliza as abas */
-            gap: 20px;
-        }
-        .stTabs [data-baseweb="tab"] {
-            background-color: transparent !important;
-            border: none !important;
-        }
-        .stTabs [aria-selected="true"] {
-            color: #FC4C02 !important; /* Texto laranja quando ativo */
-            border-bottom: 2px solid #FC4C02 !important; /* Linha laranja */
-        }
-        .stTabs [aria-selected="false"] {
-            color: #666 !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-# ============================================================================
-# 🛠️ FUNÇÃO DE ENVIO DO WHATSAPP
+# 1. FUNÇÕES DE NOTIFICAÇÃO (WHATSAPP)
 # ============================================================================
 
 def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta):
     try:
-        # 1. Busca credenciais
         sid = st.secrets["twilio"]["TWILIO_SID"].strip()
         token = st.secrets["twilio"]["TWILIO_TOKEN"].strip()
         from_number = f"whatsapp:+{st.secrets['twilio']['TWILIO_PHONE_NUMBER']}"
         
-        # 2. LIMPEZA DO TELEFONE
+        # Formata telefone
         apenas_numeros = re.sub(r'\D', '', str(telefone_atleta))
-        if len(apenas_numeros) <= 11:
+        if len(apenas_numeros) <= 11: 
             apenas_numeros = "55" + apenas_numeros
-        
         to_number = f"whatsapp:+{apenas_numeros}"
 
         client = Client(sid, token)
         
-        # CORPO DA MENSAGEM (FORMATO PADRÃO)
         corpo_msg = (
             f"🤖 *Zaptreino: Treino Sincronizado*\n\n"
             f"👤 Atleta: {nome_atleta}\n"
@@ -103,7 +40,7 @@ def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta):
         return False, str(e)
 
 # ============================================================================
-# 🛠️ FUNÇÕES AUXILIARES DE BANCO
+# 2. FUNÇÕES AUXILIARES DE BANCO
 # ============================================================================
 
 def atualizar_data_vencimento(supabase, user_id, nova_data):
@@ -115,11 +52,10 @@ def atualizar_data_vencimento(supabase, user_id, nova_data):
 
 def alternar_bloqueio(supabase, user_id, status_atual_bloqueado):
     novo_bloqueio = not status_atual_bloqueado
-    novo_status = not novo_bloqueio 
     try:
         supabase.table("usuarios_app").update({
             "bloqueado": novo_bloqueio,
-            "status_pagamento": novo_status 
+            "status_pagamento": not novo_bloqueio 
         }).eq("id", str(user_id)).execute()
         time.sleep(0.5)
         st.rerun()
@@ -127,199 +63,224 @@ def alternar_bloqueio(supabase, user_id, status_atual_bloqueado):
         st.error(f"Erro no banco: {e}")
 
 # ============================================================================
-# 🖥️ TELAS DO SISTEMA
+# 3. TELAS DO SISTEMA
 # ============================================================================
-
 def renderizar_tela_login(supabase_client):
-    aplicar_estilo_customizado()
-    
-    # Ajuste das colunas para centralizar
-    c1, c2, c3 = st.columns([1, 1.5, 1])
-    
-    with c2:
-        # --- CABEÇALHO CENTRALIZADO ---
-        st.markdown('<div style="text-align: center; width: 100%;">', unsafe_allow_html=True)
-        
-        # Exibe a logo
-        st.image("assets/logo_zaptreino.png", width=350)
-        
-        # Subtítulo ajustado
-        st.markdown('<h3 style="color: #666; font-size: 20px; margin-top: -15px; font-weight: normal;">Conecte seu movimento</h3>', unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("""
+        <style>
+        /* 1. Box Principal e Topo */
+        .block-container {
+            padding-top: 3rem !important;
+            max-width: 650px !important;
+        }
 
-        aba_login, aba_cadastro = st.tabs(["Fazer Login", "Criar Conta"])
-        
-        with aba_login:
-            with st.form("form_login"):
-                email = st.text_input("E-mail")
-                senha = st.text_input("Senha", type="password")
-                botao_entrar = st.form_submit_button("Entrar", type="primary", width='stretch')
-                
-                if botao_entrar:
-                    if not email or not senha:
-                        st.warning("Preencha todos os campos.")
-                    else:
-                        with st.spinner("Autenticando..."):
-                            email = email.strip().lower()
-                            try:
-                                res = supabase_client.table("usuarios_app").select("*").eq("email", email).eq("senha", senha).execute()
-                                if res.data:
-                                    user = res.data[0]
-                                    st.session_state.user_info = user
-                                    st.session_state.logado = True
-                                    uid = str(user.get('id') or user.get('uuid'))
-                                    st.query_params["session_id"] = uid
-                                    st.success(f"Bem-vindo, {user['nome']}!")
-                                    time.sleep(0.5)
-                                    st.rerun()
-                                else:
-                                    st.error("E-mail ou senha incorretos.")
-                            except Exception as e:
-                                st.error(f"Erro técnico: {e}")
+        /* 2. Centraliza TÍTULOS dos campos (E-mail, Senha, etc) */
+        div[data-testid="stForm"] label p {
+            text-align: center !important;
+            width: 100% !important;
+            display: flex !important;
+            justify-content: center !important;
+            font-weight: 500 !important;
+        }
 
-        with aba_cadastro:
-            with st.form("form_cadastro"):
-                novo_nome = st.text_input("Nome Completo")
-                novo_email = st.text_input("E-mail")
-                novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="11999999999")
-                
-                data_nasc = st.date_input(
-                    "Data de Nascimento",
-                    value=None,
-                    min_value=date(1940, 1, 1),
-                    max_value=date.today(),
-                    format="DD/MM/YYYY"
-                )
-                
-                nova_senha = st.text_input("Defina uma Senha", type="password")
-                confirma_senha = st.text_input("Confirme a Senha", type="password")
-                
-                st.markdown("---")
-                st.markdown("### Termos e Privacidade")
-                st.caption("Ao clicar em aceitar, você concorda com os nossos Termos de Uso e Política de Privacidade (LGPD).")
-                aceite_termos = st.checkbox("Eu li e aceito os termos e condições.")
-                
-                botao_cadastrar = st.form_submit_button("Cadastrar", width='stretch')
-                
-                if botao_cadastrar:
-                    if not novo_nome or not novo_email or not novo_telefone or not nova_senha or not data_nasc:
-                        st.warning("⚠️ Preencha todos os campos obrigatórios.")
-                    elif nova_senha != confirma_senha:
-                        st.error("❌ As senhas não coincidem.")
-                    elif not aceite_termos:
-                        st.error("🔒 É necessário aceitar os termos da LGPD.")
-                    else:
-                        with st.spinner("Criando conta..."):
-                            dados = {
-                                "nome": novo_nome, 
-                                "email": novo_email.strip().lower(),
-                                "telefone": novo_telefone, 
-                                "senha": nova_senha,
-                                "data_nascimento": str(data_nasc),
-                                "is_admin": False, 
-                                "status_pagamento": True, 
-                                "aceite_lgpd": True
-                            }
-                            try:
-                                # Verificação manual de e-mail duplicado para mensagem amigável
-                                check = supabase_client.table("usuarios_app").select("id").eq("email", novo_email).execute()
-                                if check.data:
-                                    st.error("📧 Este e-mail já está cadastrado.")
-                                else:
-                                    dados["id"] = str(uuid.uuid4())
-                                    supabase_client.table("usuarios_app").insert(dados).execute()
-                                    st.balloons()
-                                    st.success("✅ Conta criada com sucesso! Faça seu login.")
-                            except Exception as e:
-                                st.error(f"Erro ao cadastrar: {e}")
+        /* 3. Centraliza a caixa da LGPD */
+        div[data-testid="stCheckbox"] {
+            display: flex !important;
+            justify-content: center !important;
+        }
+
+        /* 4. PINTA O BOTÃO COM O LARANJA DO ZAPTREINO */
+        div[data-testid="stFormSubmitButton"] button {
+            background-color: #FF5722 !important; 
+            border-color: #FF5722 !important;
+            color: white !important;
+            border-radius: 8px !important;
+            height: 3.5em !important;
+            font-weight: bold !important;
+            margin-top: 10px !important;
+        }
+        
+        div[data-testid="stFormSubmitButton"] button:hover {
+            background-color: #E64A19 !important; 
+            border-color: #E64A19 !important;
+            color: white !important;
+        }
+
+        /* 5. Centraliza Abas e pinta a linha debaixo delas de laranja */
+        .stTabs [data-baseweb="tab-list"] {
+            justify-content: center;
+        }
+        .stTabs [aria-selected="true"] {
+            color: #FF5722 !important;
+            border-bottom-color: #FF5722 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # Logo
+    col_vazia1, col_logo, col_vazia2 = st.columns([0.5, 2, 0.5])
+    with col_logo:
+        # CORREÇÃO 1: Substituído para width="stretch"
+        st.image("assets/logo_zaptreino.png", width="stretch")
+        
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    aba_login, aba_cadastro = st.tabs(["Fazer Login", "Criar Conta"])
+    
+    with aba_login:
+        with st.form("form_login"):
+            email = st.text_input("E-mail")
+            senha = st.text_input("Senha", type="password")
+            
+            # CORREÇÃO 2: Substituído para width="stretch"
+            if st.form_submit_button("Entrar", width="stretch"):
+                if not email or not senha:
+                    st.warning("Preencha todos os campos.")
+                else:
+                    with st.spinner("Autenticando..."):
+                        email = email.strip().lower()
+                        try:
+                            res = supabase_client.table("usuarios_app").select("*").eq("email", email).eq("senha", senha).execute()
+                            if res.data:
+                                user = res.data[0]
+                                st.session_state.user_info = user
+                                st.session_state.logado = True
+                                uid = str(user.get('id') or user.get('uuid'))
+                                st.query_params["session_id"] = uid
+                                st.success(f"Bem-vindo, {user['nome']}!")
+                                time.sleep(0.5)
+                                st.rerun()
+                            else:
+                                st.error("E-mail ou senha incorretos.")
+                        except Exception as e:
+                            st.error(f"Erro técnico: {e}")
+
+    with aba_cadastro:
+        with st.form("form_cadastro"):
+            novo_nome = st.text_input("Nome Completo")
+            novo_email = st.text_input("E-mail")
+            novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="+5511999999999")
+            data_nasc = st.date_input("Data de Nascimento", value=date(1940, 1, 1), format="DD/MM/YYYY")
+            nova_senha = st.text_input("Defina uma Senha", type="password")
+            confirma_senha = st.text_input("Confirme a Senha", type="password")
+            
+            st.divider()
+            st.markdown("<h4 style='text-align: center;'>Termos e Privacidade</h4>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; color: gray; font-size: 14px;'>Ao clicar em aceitar, você concorda com os nossos Termos de Uso e Política de Privacidade (LGPD).</p>", unsafe_allow_html=True)
+            aceite_termos = st.checkbox("Eu li e aceito os termos e condições.")
+            
+            # CORREÇÃO 3: Substituído para width="stretch"
+            botao_cadastrar = st.form_submit_button("Cadastrar", width="stretch")
+            
+            if botao_cadastrar:
+                if not (novo_nome and novo_email and novo_telefone and nova_senha and data_nasc):
+                    st.warning("⚠️ Preencha todos os campos obrigatórios.")
+                elif nova_senha != confirma_senha:
+                    st.error("❌ As senhas não coincidem.")
+                elif not aceite_termos:
+                    st.error("🔒 É necessário aceitar os termos da LGPD.")
+                else:
+                    dados = {
+                        "nome": novo_nome, 
+                        "email": novo_email.strip().lower(), 
+                        "telefone": novo_telefone, 
+                        "senha": nova_senha, 
+                        "data_nascimento": str(data_nasc), 
+                        "is_admin": False, 
+                        "status_pagamento": True,
+                        "aceite_lgpd": True
+                    }
+                    try:
+                        dados["id"] = str(uuid.uuid4())
+                        supabase_client.table("usuarios_app").insert(dados).execute()
+                        st.balloons()
+                        st.success("Conta criada! Faça login na aba ao lado.")
+                    except:
+                        st.error("Erro ao cadastrar. E-mail já existe?")
 
 def renderizar_tela_admin(supabase_client):
-    st.title("Painel Administrativo 🔒")
+    st.title("Painel Admin 🔒")
     
-    # --- RASTREADOR DE PAGAMENTOS ---
-    try:
-        token_mp = st.secrets.get("MP_ACCESS_TOKEN")
-        if token_mp:
-            res_users = supabase_client.table("usuarios_app").select("id, nome, id_pagamento_mp").execute()
-            for aluno in res_users.data:
-                mp_id = str(aluno.get('id_pagamento_mp')).strip()
-                if mp_id and mp_id != "None":
-                    try:
-                        url = f"https://api.mercadopago.com/v1/payments/{mp_id}"
-                        res_mp = requests.get(url, headers={"Authorization": f"Bearer {token_mp}"}).json()
-                        if res_mp.get("status") == "approved":
-                            st.success(f"💰 {aluno['nome']} PAGOU!")
-                    except: pass
-    except Exception as e:
-        st.error(f"Erro MP: {e}")
-
-    # --- LISTA DE ALUNOS COM EDITAR/EXCLUIR ---
+    # Busca usuários
     try:
         users = supabase_client.table("usuarios_app").select("*").order("nome").execute().data
         if users:
-            st.markdown("### 📋 Controle de Alunos")
-            
             for user in users:
-                if user.get('is_admin'): continue # Pula o admin
+                # Pula o administrador para ele não aparecer na lista
+                if user.get('is_admin'): continue
                 
                 with st.container(border=True):
+                    # Dividimos em 3 colunas para caber a Data de Vencimento no meio
                     c1, c2, c3 = st.columns([2, 1.5, 1.5])
                     
-                    c1.write(f"👤 **{user['nome']}**")
+                    # Coluna 1: Nome e Email
+                    with c1:
+                        # Desce o texto levemente para alinhar com o input de data
+                        st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
+                        st.write(f"**{user['nome']}**")
+                        st.caption(f"{user['email']}")
                     
-                    data_venc = user.get('data_vencimento') or str(date.today())
-                    nova_data = c2.date_input("Venc.", value=datetime.strptime(data_venc, '%Y-%m-%d').date(), key=f"d_{user['id']}", label_visibility="collapsed")
-                    if str(nova_data) != data_venc:
-                        atualizar_data_vencimento(supabase_client, user['id'], nova_data)
-                    
-                    if user.get('bloqueado'):
-                        if c3.button("✅ Liberar", key=f"lib_{user['id']}"):
-                            supabase_client.table("usuarios_app").update({"id_pagamento_mp": None}).eq("id", user['id']).execute()
-                            alternar_bloqueio(supabase_client, user['id'], True)
-                    else:
-                        if c3.button("⛔ Bloquear", key=f"bloq_{user['id']}", type="primary"):
-                            alternar_bloqueio(supabase_client, user['id'], False)
-
-                    # --- ÁREA DE EDIÇÃO E EXCLUSÃO ---
-                    with st.expander("⚙️ Editar / Excluir"):
-                        with st.form(key=f"form_edit_{user['id']}"):
-                            st.caption("Editar Dados Cadastrais")
-                            col_e1, col_e2 = st.columns(2)
-                            edit_nome = col_e1.text_input("Nome", value=user['nome'])
-                            edit_email = col_e2.text_input("E-mail", value=user['email'])
-                            edit_tel = st.text_input("Telefone", value=user.get('telefone', ''))
+                    # --- 2. DATA DE VENCIMENTO ---
+                    with c2:
+                        venc_atual = user.get('data_vencimento')
+                        try:
+                            val_venc = datetime.strptime(str(venc_atual), '%Y-%m-%d').date() if venc_atual else date.today()
+                        except:
+                            val_venc = date.today()
                             
-                            if st.form_submit_button("💾 Salvar Alterações"):
+                        nova_data = st.date_input("Vencimento", value=val_venc, key=f"data_{user['id']}")
+                        if st.button("💾 Salvar Data", key=f"btn_venc_{user['id']}", width="stretch"):
+                            atualizar_data_vencimento(supabase_client, user['id'], nova_data)
+                    
+                    # --- 1. BOTÕES DE BLOQUEIO (AGORA ALINHADOS) ---
+                    with c3:
+                        # MÁGICA DO ALINHAMENTO: Empurra o botão exatos 28px para baixo, 
+                        # compensando o espaço ocupado pela palavra "Vencimento" na coluna 2.
+                        st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                        
+                        if user.get('bloqueado'):
+                            # Botão Liberar (Verde/Padrão)
+                            if st.button("🟢 Liberar", key=f"lib_{user['id']}", width="stretch"):
+                                alternar_bloqueio(supabase_client, user['id'], True)
+                        else:
+                            # Botão Bloquear (Vermelho/Laranja com type="primary")
+                            if st.button("🔴 Bloquear", key=f"bloq_{user['id']}", type="primary", width="stretch"):
+                                alternar_bloqueio(supabase_client, user['id'], False)
+                    
+                    # --- 3. CAMPOS DE EDIÇÃO DOS ALUNOS ---
+                    with st.expander("✏️ Editar / Excluir Aluno"):
+                        with st.form(key=f"form_edit_{user['id']}"):
+                            col_ed1, col_ed2 = st.columns(2)
+                            ed_nome = col_ed1.text_input("Nome", value=user.get('nome', ''))
+                            ed_tel = col_ed2.text_input("WhatsApp", value=user.get('telefone', ''))
+                            
+                            # Botão de salvar a edição do aluno
+                            if st.form_submit_button("💾 Atualizar Dados", width="stretch"):
                                 try:
                                     supabase_client.table("usuarios_app").update({
-                                        "nome": edit_nome,
-                                        "email": edit_email,
-                                        "telefone": edit_tel
+                                        "nome": ed_nome,
+                                        "telefone": ed_tel
                                     }).eq("id", user['id']).execute()
-                                    st.toast("Dados atualizados com sucesso!", icon="✅")
+                                    st.success("Aluno atualizado com sucesso!")
                                     time.sleep(1)
                                     st.rerun()
                                 except Exception as e:
-                                    st.error(f"Erro ao salvar: {e}")
-
-                        st.markdown("---")
+                                    st.error(f"Erro ao atualizar: {e}")
                         
-                        col_del_txt, col_del_btn = st.columns([3, 1])
-                        col_del_txt.warning("⚠️ **Zona de Perigo:** A exclusão é irreversível.")
+                        st.markdown("<br>", unsafe_allow_html=True)
                         
-                        if col_del_btn.button("🗑️ Excluir", key=f"del_btn_{user['id']}", type="primary"):
+                        # Botão de exclusão definitiva
+                        if st.button("🗑️ Excluir Definitivamente", key=f"del_{user['id']}", type="primary", width="stretch"):
                             try:
                                 supabase_client.table("usuarios_app").delete().eq("id", user['id']).execute()
-                                st.success(f"Usuário {user['nome']} removido!")
+                                st.warning("Usuário excluído do sistema.")
                                 time.sleep(1)
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Erro ao excluir: {e}")
 
     except Exception as e:
-        st.error(f"Erro lista: {e}")
+        st.error(f"Erro ao carregar lista de alunos: {e}")
 
 def renderizar_tela_bloqueio_financeiro():
     user = st.session_state.user_info
@@ -392,6 +353,38 @@ def renderizar_edicao_perfil(supabase_client, user):
     """
     Renderiza um formulário retrátil para o atleta editar seus próprios dados.
     """
+    # ==========================================================
+    # 1. BUSCA O VENCIMENTO DIRETO DO BANCO DE DADOS
+    # ==========================================================
+    vencimento_banco = None
+    try:
+        res = supabase_client.table("usuarios_app").select("data_vencimento").eq("id", user['id']).execute()
+        if res.data and len(res.data) > 0:
+            vencimento_banco = res.data[0].get("data_vencimento")
+    except:
+        pass
+        
+    if not vencimento_banco:
+        vencimento_banco = user.get("data_vencimento")
+
+    # Formata a data para exibir
+    if vencimento_banco:
+        try:
+            data_obj = datetime.strptime(str(vencimento_banco).strip(), '%Y-%m-%d')
+            data_texto = data_obj.strftime('%d/%m/%Y')
+        except:
+            data_texto = str(vencimento_banco)
+    else:
+        data_texto = "Data não definida"
+
+    # MOSTRA A DATA EM DESTAQUE LARANJA
+    st.markdown(f"""
+        <div style='background-color: #FFF3E0; border-left: 5px solid #FC4C02; padding: 10px; border-radius: 5px; margin-bottom: 15px;'>
+            <h4 style='color: #FC4C02; margin: 0; font-size: 16px;'>📅 Vencimento do Plano: {data_texto}</h4>
+        </div>
+    """, unsafe_allow_html=True)
+    # ==========================================================
+
     with st.expander("⚙️ Editar Meus Dados / Senha", expanded=False):
         with st.form(key="form_edit_proprio_perfil"):
             c1, c2 = st.columns(2)
@@ -411,7 +404,7 @@ def renderizar_edicao_perfil(supabase_client, user):
             nova_data = c1.date_input("Nascimento", value=val_data, format="DD/MM/YYYY")
             nova_senha = c2.text_input("Nova Senha (opcional)", type="password", help="Deixe vazio para manter a atual")
             
-            if st.form_submit_button("💾 Atualizar Meus Dados"):
+            if st.form_submit_button("💾 Atualizar Meus Dados", width="stretch"):
                 dados_update = {
                     "nome": novo_nome,
                     "telefone": novo_tel,

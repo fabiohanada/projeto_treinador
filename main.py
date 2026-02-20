@@ -194,7 +194,7 @@ else:
             redirect_uri = st.secrets.get("REDIRECT_URI")
             link_strava = f"https://www.strava.com/oauth/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
             
-            st.markdown(f'''<a href="{link_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">🔗 Reconectar Strava</button></a>''', unsafe_allow_html=True)
+            st.markdown(f'''<a href="{link_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Connect Strava</button></a>''', unsafe_allow_html=True)
             st.caption("Use apenas se precisar revalidar a conta.")
 
         st.markdown("---")
