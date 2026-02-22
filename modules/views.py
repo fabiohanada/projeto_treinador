@@ -13,14 +13,16 @@ from supabase import create_client
 
 def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta):
     try:
-        sid = st.secrets["twilio"]["TWILIO_SID"].strip()
-        token = st.secrets["twilio"]["TWILIO_TOKEN"].strip()
+        # Puxa do st.secrets (que configuraremos no Deploy)
+        sid = st.secrets["twilio"]["TWILIO_SID"]
+        token = st.secrets["twilio"]["TWILIO_TOKEN"]
         from_number = f"whatsapp:+{st.secrets['twilio']['TWILIO_PHONE_NUMBER']}"
         
-        # Formata telefone
-        apenas_numeros = re.sub(r'\D', '', str(telefone_atleta))
-        if len(apenas_numeros) <= 11: 
+        # Limpa o número para evitar o erro do "55" duplicado
+        apenas_numeros = "".join(filter(str.isdigit, str(telefone_atleta)))
+        if not apenas_numeros.startswith('55'):
             apenas_numeros = "55" + apenas_numeros
+            
         to_number = f"whatsapp:+{apenas_numeros}"
 
         client = Client(sid, token)
@@ -30,8 +32,7 @@ def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta):
             f"👤 Atleta: {nome_atleta}\n"
             f"📏 Distância: {dados_treino['distancia']}\n"
             f"⏱️ Duração: {dados_treino['duracao']}\n"
-            f"📊 TRIMP Semanal: {dados_treino.get('trimp_semanal', '-')}\n"
-            f"📊 TRIMP Mensal: {dados_treino.get('trimp_mensal', '-')}"
+            f"📊 TRIMP Semanal: {dados_treino.get('trimp_semanal', '-')}"
         )
         
         msg = client.messages.create(body=corpo_msg, from_=from_number, to=to_number)
