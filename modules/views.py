@@ -2,7 +2,7 @@ import streamlit as st
 import time
 import requests
 import uuid
-from datetime import datetime, date
+from datetime import date, datetime
 from twilio.rest import Client
 import re
 from supabase import create_client
@@ -161,7 +161,14 @@ def renderizar_tela_login(supabase_client):
             novo_nome = st.text_input("Nome Completo")
             novo_email = st.text_input("E-mail")
             novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="+5511999999999")
-            data_nasc = st.date_input("Data de Nascimento", value=date(1940, 1, 1), format="DD/MM/YYYY")
+            # Como deve ficar o seu código na linha 167:
+            data_nasc = st.date_input(
+                "Data de Nascimento",
+                value=None,  # Começa vazio
+                min_value=date(1920, 1, 1), # Usando apenas date(...)
+                max_value=date.today(),      # Usando date.today()
+                format="DD/MM/YYYY"
+            )
             nova_senha = st.text_input("Defina uma Senha", type="password")
             confirma_senha = st.text_input("Confirme a Senha", type="password")
             
