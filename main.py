@@ -30,18 +30,11 @@ estilizar_botoes()
 # ============================================================================
 
 def calcular_trimp_banister(duracao_min, fc_media, fc_max, fc_repouso=60):
-    """
-    Calcula o TRIMP (Impulso de Treino) usando o método de Banister.
-    Usa a FC Máxima real baseada na idade do aluno.
-    """
     if not fc_media or fc_media <= 0:
         return int(duracao_min * 1.5) 
         
     if fc_max <= fc_repouso: fc_max = 190
-
-    # Fator de ponderação (b) - Padrão masculino
     b = 1.92 
-    
     reserva = (fc_media - fc_repouso) / (fc_max - fc_repouso)
     
     try:
@@ -52,7 +45,6 @@ def calcular_trimp_banister(duracao_min, fc_media, fc_max, fc_repouso=60):
 
 def processar_sincronizacao(auth_code, user_id):
     try:
-        # 1. Busca idade (Mantido igual)
         user_data = supabase.table("usuarios_app").select("data_nascimento").eq("id", user_id).execute()
         fc_max_atleta = 190
         
@@ -62,12 +54,11 @@ def processar_sincronizacao(auth_code, user_id):
                 fc_max_atleta = 220 - (datetime.now().year - ano_nasc)
             except: pass
             
-        # 2. Troca Code por Token
         response = requests.post(
             "https://www.strava.com/api/v3/oauth/token",
             data={
-                'client_id': st.secrets.get("STRAVA_CLIENT_ID"),
-                'client_secret': st.secrets.get("STRAVA_CLIENT_SECRET"),
+                'client_id': st.secrets["STRAVA_CLIENT_ID"],
+                'client_secret': st.secrets["STRAVA_CLIENT_SECRET"],
                 'code': auth_code,
                 'grant_type': 'authorization_code'
             }
@@ -75,7 +66,6 @@ def processar_sincronizacao(auth_code, user_id):
         
         token = response.get('access_token')
         
-        # --- NOVIDADE V16.0: SALVAR O TOKEN NO BANCO PARA O ROBÔ USAR DEPOIS ---
         if token:
             dados_token = {
                 "user_id": user_id,
@@ -85,11 +75,8 @@ def processar_sincronizacao(auth_code, user_id):
                 "expires_at": response.get('expires_at'),
                 "updated_at": str(datetime.now())
             }
-            # Salva na tabela nova que acabamos de criar
             supabase.table("auth_strava").upsert(dados_token).execute()
-        # -----------------------------------------------------------------------
         
-        # 3. Importa treinos (Mantido igual)
         if token:
             headers = {'Authorization': f'Bearer {token}'}
             atividades = requests.get("https://www.strava.com/api/v3/athlete/activities", 
@@ -100,7 +87,6 @@ def processar_sincronizacao(auth_code, user_id):
                     dist = act.get('distance', 0) / 1000
                     dur_minutos = act.get('moving_time', 0) / 60
                     fc_media_treino = act.get('average_heartrate', 0)
-                    
                     trimp_real = calcular_trimp_banister(dur_minutos, fc_media_treino, fc_max_atleta)
                     
                     dados = {
@@ -143,15 +129,15 @@ if not st.session_state.logado and target_id:
             st.rerun()
 
 # ============================================================================
-# 4. FUNÇÃO DE GRÁFICOS (ANALÍTICO)
+# 4. FUNÇÃO DE GRÁFICOS (ANALÍTICO) - CORRIGIDA
 # ============================================================================
 def gerar_grafico_analise(df, titulo, dias=7):
     df_temp = df.copy()
     df_temp['data_treino'] = pd.to_datetime(df_temp['data_treino']).dt.tz_localize(None)
     
-    hoje = datetime.now()
+    hoje = datetime.now().replace(hour=23, minute=59, second=59)
     data_inicio = hoje - timedelta(days=dias)
-    df_filtrado = df_temp[df_temp['data_treino'] > data_inicio].copy()
+    df_filtrado = df_temp[df_temp['data_treino'] >= data_inicio].sort_values('data_treino').copy()
     
     if df_filtrado.empty: return None
     
@@ -161,63 +147,53 @@ def gerar_grafico_analise(df, titulo, dias=7):
                           name="Km", marker_color='lightgrey', opacity=0.5), secondary_y=True)
                           
     fig.add_trace(go.Scatter(x=df_filtrado['data_treino'], y=df_filtrado['trimp_score'], 
-                             name="Carga (TRIMP)", mode='lines+markers', line=dict(color='#FC4C02', width=3)), secondary_y=False)
+                               name="Carga (TRIMP)", mode='lines+markers', line=dict(color='#FC4C02', width=3)), secondary_y=False)
     
-    fig.update_layout(title_text=titulo, template="plotly_white", hovermode="x unified", showlegend=False, height=400)
+    fig.update_layout(title_text=titulo, template="plotly_white", hovermode="x unified", showlegend=False, height=400, margin=dict(l=10, r=10, t=50, b=10))
     fig.update_yaxes(title_text="Carga Interna (TRIMP)", secondary_y=False)
     fig.update_yaxes(title_text="Distância (Km)", secondary_y=True, showgrid=False)
     return fig
 
 # ============================================================================
-# 5. CONTROLE DE TELAS (ORDEM DE PRIORIDADE)
+# 5. CONTROLE DE TELAS
 # ============================================================================
 
-# TELA 1: LOGIN
 if not st.session_state.logado:
     renderizar_tela_login(supabase)
-
 else:
     user = st.session_state.user_info
     
-    # --- BARRA LATERAL (SIDEBAR) ---
     with st.sidebar:
         st.markdown(f"### DataPace Analytics")
         st.write(f"👤 **{user['nome']}**")
         
         is_ativo = not user.get('bloqueado') and user.get('status_pagamento') != False
         if is_ativo:
-            
             renderizar_edicao_perfil(supabase, user)
             st.markdown("---") 
-
-            client_id = st.secrets.get('STRAVA_CLIENT_ID')
-            redirect_uri = st.secrets.get("REDIRECT_URI")
-            link_strava = f"https://www.strava.com/oauth/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
-            
-            st.markdown(f'''<a href="{link_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Connect Strava</button></a>''', unsafe_allow_html=True)
-            st.caption("Use apenas se precisar revalidar a conta.")
-
+            try:
+                client_id = st.secrets["STRAVA_CLIENT_ID"]
+                redirect_uri = st.secrets["STRAVA_REDIRECT_URI"]
+                link_strava = f"https://www.strava.com/oauth/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
+                st.markdown(f'''<a href="{link_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Connect Strava</button></a>''', unsafe_allow_html=True)
+            except:
+                st.error("Erro nas chaves do Strava.")
+        
         st.markdown("---")
-        # Mantive use_container_width=True aqui pois botões ainda usam esse padrão em muitas versões
-        if st.button("Sair da Conta", type="secondary", use_container_width=True):
+        # ATUALIZADO: width='stretch'
+        if st.button("Sair da Conta", type="secondary", width='stretch'):
             st.session_state.clear()
             st.query_params.clear()
             st.rerun()
 
-    # TELA 2: PAINEL ADMIN
     if user.get('is_admin'):
         renderizar_tela_admin(supabase)
-        
-    # TELA 3: BLOQUEIO FINANCEIRO
     elif user.get('bloqueado') or user.get('status_pagamento') == False:
         renderizar_tela_bloqueio_financeiro()
-        
-    # TELA 4: DASHBOARD DO ALUNO (Fluxo normal)
     else:
         c1, c2 = st.columns([3, 1])
         with c1:
-            primeiro_nome = user['nome'].split()[0]
-            st.title(f"Olá, {primeiro_nome}! 🏃‍♂️")
+            st.title(f"Olá, {user['nome'].split()[0]}! 🏃‍♂️")
         with c2:
             if st.button("🔄 Atualizar Painel"):
                 st.cache_data.clear()
@@ -227,77 +203,34 @@ else:
         
         if res_treinos.data:
             df = pd.DataFrame(res_treinos.data)
-            
             df['data_treino'] = pd.to_datetime(df['data_treino']).dt.tz_localize(None)
-            df['distancia'] = pd.to_numeric(df['distancia'], errors='coerce').fillna(0)
-            df['trimp_score'] = pd.to_numeric(df['trimp_score'], errors='coerce').fillna(0)
-            df['duracao'] = pd.to_numeric(df['duracao'], errors='coerce').fillna(0)
             
-            agora = datetime.now()
-
             if st.session_state.get('just_synced'):
-                ultimo = df.iloc[0]
-                soma_7d = df[df['data_treino'] > (agora - timedelta(days=7))]['trimp_score'].sum()
-                soma_30d = df[df['data_treino'] > (agora - timedelta(days=30))]['trimp_score'].sum()
-                
-                status_w = "Ideal ✅" if soma_7d < 600 else "Alto ⚠️"
-                status_m = "Consistente ✅" if soma_30d > 1000 else "Baixo 📉"
-
-                dados_zap = {
-                    "distancia": f"{ultimo['distancia']:.2f} km",
-                    "duracao": f"{int(ultimo['duracao'])} min",
-                    "trimp_semanal": status_w,
-                    "trimp_mensal": status_m
-                }
-                
-                enviar_notificacao_treino(dados_zap, user['nome'], user.get('telefone'))
                 st.session_state['just_synced'] = False
-                st.toast("Notificação enviada ao WhatsApp!", icon="📲")
+                st.toast("Treinos sincronizados!", icon="📲")
 
             m1, m2, m3 = st.columns(3)
             m1.metric("Total de Treinos", len(df))
             m2.metric("Distância Total", f"{df['distancia'].sum():.1f} km")
-            m3.metric("Carga Média (TRIMP)", f"{int(df['trimp_score'].mean())} pts")
+            m3.metric("Carga Média", f"{int(df['trimp_score'].mean())} pts")
             
-            st.markdown("### 📋 Histórico Recente")
-            df_show = df.head(10).copy()
-            df_show['Data'] = df_show['data_treino'].dt.strftime('%d/%m/%Y')
-            
-            if 'name' not in df_show.columns:
-                df_show['name'] = 'Treino Importado'
-
-            # CORREÇÃO AQUI: Mudança para width='stretch'
+            # ATUALIZADO: width='stretch'
             st.dataframe(
-                df_show[['Data', 'name', 'distancia', 'duracao', 'trimp_score']], 
-                width='stretch',  # <--- CORRIGIDO
-                hide_index=True,
-                column_config={
-                    "name": "Nome da Atividade",
-                    "distancia": st.column_config.NumberColumn("Distância (km)", format="%.2f"),
-                    "duracao": st.column_config.NumberColumn("Tempo (min)", format="%d"),
-                    "trimp_score": st.column_config.ProgressColumn(
-                        "Carga Interna (TRIMP)", 
-                        format="%d", 
-                        min_value=0, 
-                        max_value=300,
-                        help="Pontuação de esforço baseada na sua FC Máxima"
-                    )
-                }
+                df.head(10)[['data_treino', 'name', 'distancia', 'duracao', 'trimp_score']], 
+                width='stretch',
+                hide_index=True
             )
 
             st.markdown("### 📊 Análise de Evolução")
             col1, col2 = st.columns(2)
-            fig1 = gerar_grafico_analise(df, "Volume vs Esforço (7 dias)", 7)
-            fig2 = gerar_grafico_analise(df, "Consistência Mensal (30 dias)", 30)
+            # Mudamos para 365 dias (1 ano) e 3650 dias (10 anos) para forçar os dados a aparecerem
+            fig1 = gerar_grafico_analise(df, "Volume vs Esforço (Último ano)", 365)
+            fig2 = gerar_grafico_analise(df, "Consistência Histórica", 3650)
             
-            # CORREÇÃO AQUI: Mudança para width='stretch'
-            if fig1: col1.plotly_chart(fig1, width='stretch') # <--- CORRIGIDO
-            if fig2: col2.plotly_chart(fig2, width='stretch') # <--- CORRIGIDO
-            
+            # ATUALIZADO: width='stretch'
+            if fig1: col1.plotly_chart(fig1, width='stretch')
+            if fig2: col2.plotly_chart(fig2, width='stretch')
         else:
-            st.info("Bem-vindo à DataPace! Conecte seu Strava no menu lateral para importar seus treinos.")
+            st.info("Conecte seu Strava para ver seus treinos.")
 
-# ============================================================================
-# 6. RODAPÉ JURÍDICO
-# ============================================================================
 exibir_logo_rodape()
