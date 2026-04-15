@@ -77,29 +77,64 @@ def processar_sincronizacao(auth_code, user_id):
             }
             supabase.table("auth_strava").upsert(dados_token).execute()
         
-        if token:
             headers = {'Authorization': f'Bearer {token}'}
             atividades = requests.get("https://www.strava.com/api/v3/athlete/activities", 
-                                    headers=headers, params={'per_page': 10}).json()
+                                    headers=headers, params={'per_page': 5}).json()
             
-            for act in atividades:
-                if act['type'] in ['Run', 'VirtualRun', 'TrailRun', 'Ride', 'Walk', 'WeightTraining', 'Workout']:
-                    dist = act.get('distance', 0) / 1000
-                    dur_minutos = act.get('moving_time', 0) / 60
-                    fc_media_treino = act.get('average_heartrate', 0)
+            # --- NOVA LÓGICA: SÓ O ÚLTIMO TREINO ---
+            if atividades:
+                # Pegamos apenas a primeira atividade da lista (a mais recente)
+                ultima_act = atividades[0]
+                
+                if ultima_act['type'] in ['Run', 'VirtualRun', 'TrailRun', 'Ride', 'Walk', 'WeightTraining', 'Workout']:
+                    dist = round(ultima_act.get('distance', 0) / 1000, 2)
+                    dur_minutos = int(ultima_act.get('moving_time', 0) / 60)
+                    fc_media_treino = ultima_act.get('average_heartrate', 0)
                     trimp_real = calcular_trimp_banister(dur_minutos, fc_media_treino, fc_max_atleta)
                     
                     dados = {
                         "id_atleta": user_id,
-                        "strava_id": str(act['id']),
-                        "tipo_esporte": act['type'],
+                        "strava_id": str(ultima_act['id']),
+                        "tipo_esporte": ultima_act['type'],
                         "distancia": dist,
-                        "duracao": int(dur_minutos),
-                        "data_treino": act['start_date_local'][:10],
-                        "name": act.get('name', 'Treino'),
+                        "duracao": dur_minutos,
+                        "data_treino": ultima_act['start_date_local'][:10],
+                        "name": ultima_act.get('name', 'Treino'),
                         "trimp_score": trimp_real 
                     }
-                    supabase.table("atividades_fisicas").upsert(dados, on_conflict="strava_id").execute()
+                    
+                    # Salva no banco
+                    res_db = supabase.table("atividades_fisicas").upsert(dados, on_conflict="strava_id").execute()
+                    
+                    # 🚀 ENVIA WHATSAPP APENAS DESTA ÚLTIMA ATIVIDADE
+                    if res_db.data:
+                        dados_zap = {
+                            "distancia": f"{dist} km",
+                            "duracao": f"{dur_minutos} min",
+                            "trimp_semanal": f"{trimp_real} pts"
+                        }
+                        nome_atleta = st.session_state.user_info.get('nome', 'Atleta')
+                        enviar_notificacao_treino(dados_zap, nome_atleta)
+
+                # Processa as outras 4 atividades apenas para atualizar o banco (sem enviar Zap)
+                for act in atividades[1:]:
+                     if act['type'] in ['Run', 'VirtualRun', 'TrailRun', 'Ride', 'Walk', 'WeightTraining', 'Workout']:
+                        dist_outros = round(act.get('distance', 0) / 1000, 2)
+                        dur_outros = int(act.get('moving_time', 0) / 60)
+                        trimp_outros = calcular_trimp_banister(dur_outros, act.get('average_heartrate', 0), fc_max_atleta)
+                        
+                        dados_outros = {
+                            "id_atleta": user_id,
+                            "strava_id": str(act['id']),
+                            "tipo_esporte": act['type'],
+                            "distancia": dist_outros,
+                            "duracao": dur_outros,
+                            "data_treino": act['start_date_local'][:10],
+                            "name": act.get('name', 'Treino'),
+                            "trimp_score": trimp_outros
+                        }
+                        supabase.table("atividades_fisicas").upsert(dados_outros, on_conflict="strava_id").execute()
+            
             return True
         return False
     except Exception as e:
@@ -129,7 +164,7 @@ if not st.session_state.logado and target_id:
             st.rerun()
 
 # ============================================================================
-# 4. FUNÇÃO DE GRÁFICOS (ANALÍTICO) - CORRIGIDA
+# 4. FUNÇÃO DE GRÁFICOS
 # ============================================================================
 def gerar_grafico_analise(df, titulo, dias=7):
     df_temp = df.copy()
@@ -180,7 +215,6 @@ else:
                 st.error("Erro nas chaves do Strava.")
         
         st.markdown("---")
-        # ATUALIZADO: width='stretch'
         if st.button("Sair da Conta", type="secondary", width='stretch'):
             st.session_state.clear()
             st.query_params.clear()
@@ -191,6 +225,7 @@ else:
     elif user.get('bloqueado') or user.get('status_pagamento') == False:
         renderizar_tela_bloqueio_financeiro()
     else:
+        # Layout do Aluno
         c1, c2 = st.columns([3, 1])
         with c1:
             st.title(f"Olá, {user['nome'].split()[0]}! 🏃‍♂️")
@@ -214,20 +249,25 @@ else:
             m2.metric("Distância Total", f"{df['distancia'].sum():.1f} km")
             m3.metric("Carga Média", f"{int(df['trimp_score'].mean())} pts")
             
-            # ATUALIZADO: width='stretch'
+            # --- TABELA FORMATADA (ARREDONDAMENTOS) ---
             st.dataframe(
                 df.head(10)[['data_treino', 'name', 'distancia', 'duracao', 'trimp_score']], 
                 width='stretch',
-                hide_index=True
+                hide_index=True,
+                column_config={
+                    "data_treino": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                    "name": "Atividade",
+                    "distancia": st.column_config.NumberColumn("Km", format="%.2f"),
+                    "duracao": st.column_config.NumberColumn("Min", format="%d"),
+                    "trimp_score": st.column_config.NumberColumn("TRIMP", format="%d"),
+                }
             )
 
             st.markdown("### 📊 Análise de Evolução")
             col1, col2 = st.columns(2)
-            # Mudamos para 365 dias (1 ano) e 3650 dias (10 anos) para forçar os dados a aparecerem
             fig1 = gerar_grafico_analise(df, "Volume vs Esforço (Último ano)", 365)
             fig2 = gerar_grafico_analise(df, "Consistência Histórica", 3650)
             
-            # ATUALIZADO: width='stretch'
             if fig1: col1.plotly_chart(fig1, width='stretch')
             if fig2: col2.plotly_chart(fig2, width='stretch')
         else:

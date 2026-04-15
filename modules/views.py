@@ -11,34 +11,43 @@ from supabase import create_client
 # 1. FUNÇÕES DE NOTIFICAÇÃO (WHATSAPP)
 # ============================================================================
 
-def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta):
+def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta=None):
     try:
-        # Puxa do st.secrets (que configuraremos no Deploy)
-        sid = st.secrets["twilio"]["TWILIO_SID"]
-        token = st.secrets["twilio"]["TWILIO_TOKEN"]
-        from_number = f"whatsapp:+{st.secrets['twilio']['TWILIO_PHONE_NUMBER']}"
+        # 1. Puxa as chaves (Garante que está pegando do lugar certo)
+        sid = st.secrets.get("TWILIO_SID")
+        token = st.secrets.get("TWILIO_TOKEN")
         
-        # Limpa o número para evitar o erro do "55" duplicado
-        apenas_numeros = "".join(filter(str.isdigit, str(telefone_atleta)))
-        if not apenas_numeros.startswith('55'):
-            apenas_numeros = "55" + apenas_numeros
-            
-        to_number = f"whatsapp:+{apenas_numeros}"
+        # 2. Puxa os números e remove qualquer espaço em branco que possa ter vindo
+        from_raw = str(st.secrets.get("TWILIO_PHONE_NUMBER")).strip()
+        to_raw = str(st.secrets.get("MEU_CELULAR")).strip()
+
+        # 3. Formatação CRÍTICA: Precisa ter o 'whatsapp:+' antes do número
+        # O erro 63007 acontece se o número não bater exatamente com o que está no painel
+        from_number = f"whatsapp:+{from_raw}"
+        to_number = f"whatsapp:+{to_raw}"
 
         client = Client(sid, token)
         
         corpo_msg = (
-            f"🤖 *Zaptreino: Treino Sincronizado*\n\n"
-            f"👤 Atleta: {nome_atleta}\n"
-            f"📏 Distância: {dados_treino['distancia']}\n"
-            f"⏱️ Duração: {dados_treino['duracao']}\n"
-            f"📊 TRIMP Semanal: {dados_treino.get('trimp_semanal', '-')}"
+            f"🏃‍♂️ *Zaptreino Alerta*\n\n"
+            f"Fala {nome_atleta}, treino sincronizado!\n"
+            f"📏 Distância: {dados_treino.get('distancia')}\n"
+            f"⏱️ Tempo: {dados_treino.get('duracao')}\n"
+            f"📊 Carga 7d: {dados_treino.get('trimp_semanal', '-')}\n"
+            f"📈 Carga 30d: {dados_treino.get('trimp_mensal', '-')}\n\n"
+            f"Bora pra cima! 👊"
         )
         
-        msg = client.messages.create(body=corpo_msg, from_=from_number, to=to_number)
-        return True, msg.sid
+        # 4. Disparo
+        msg = client.messages.create(
+            body=corpo_msg, 
+            from_=from_number, 
+            to=to_number
+        )
+        return True
     except Exception as e:
-        return False, str(e)
+        print(f"Erro no Twilio (Detalhado): {e}")
+        return False
 
 # ============================================================================
 # 2. FUNÇÕES AUXILIARES DE BANCO
@@ -293,6 +302,7 @@ def renderizar_tela_admin(supabase_client):
 def renderizar_tela_bloqueio_financeiro():
     user = st.session_state.user_info
     token_mp = st.secrets.get("MP_ACCESS_TOKEN")
+    
     if not token_mp and "mercadopago" in st.secrets:
         token_mp = st.secrets["mercadopago"].get("MP_ACCESS_TOKEN")
 
@@ -304,13 +314,19 @@ def renderizar_tela_bloqueio_financeiro():
         st.error("Erro de configuração do Pagamento. Contate o suporte.")
         return
 
+    # --- LÓGICA DE GERAÇÃO E VERIFICAÇÃO ---
+    
+    # 1. SE NÃO EXISTE ID OU SE O BOTÃO DE "GERAR NOVA" FOR CLICADO
     if not user.get('id_pagamento_mp'):
-        if st.button("💠 Gerar QR Code PIX"):
-            with st.spinner("Gerando cobrança..."):
+        if st.button("💠 Gerar Cobrança PIX (R$ 10,00)", width="stretch"):
+            with st.spinner("Gerando QR Code..."):
                 url = "https://api.mercadopago.com/v1/payments"
-                headers = {"Authorization": f"Bearer {token_mp}", "X-Idempotency-Key": str(uuid.uuid4())}
+                headers = {
+                    "Authorization": f"Bearer {token_mp}", 
+                    "X-Idempotency-Key": str(uuid.uuid4())
+                }
                 payload = {
-                    "transaction_amount": 1.00,
+                    "transaction_amount": 10.00,
                     "description": f"Mensalidade - {user['nome']}",
                     "payment_method_id": "pix",
                     "payer": {"email": user['email']}
@@ -321,13 +337,17 @@ def renderizar_tela_bloqueio_financeiro():
                     if "id" in res:
                         mp_id = str(res["id"])
                         supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+                        # Atualiza no banco para o código sair deste IF na próxima rodada
                         supabase.table("usuarios_app").update({"id_pagamento_mp": mp_id}).eq("id", user['id']).execute()
                         st.session_state.user_info['id_pagamento_mp'] = mp_id
                         st.rerun()
                     else:
-                        st.error(f"Erro MP: {res.get('message')}")
+                        st.error(f"Erro ao gerar: {res.get('message')}")
                 except Exception as e:
                     st.error(f"Erro de conexão: {e}")
+        st.stop() # Garante que não mostre nada abaixo enquanto não houver ID
+
+    # 2. SE JÁ EXISTE UM ID, BUSCA O STATUS E MOSTRA O QR CODE
     else:
         mp_id = user['id_pagamento_mp']
         url = f"https://api.mercadopago.com/v1/payments/{mp_id}"
@@ -335,27 +355,53 @@ def renderizar_tela_bloqueio_financeiro():
         
         try:
             res = requests.get(url, headers=headers).json()
-            if res.get("status") == "approved":
-                st.success("Pagamento Aprovado! Seu acesso será liberado em instantes.")
+            status = res.get("status")
+
+            # SE JÁ PAGOU
+            if status == "approved":
+                st.success("✅ Pagamento Aprovado! Liberando acesso...")
                 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-                supabase.table("usuarios_app").update({"bloqueado": False, "status_pagamento": True}).eq("id", user['id']).execute()
+                supabase.table("usuarios_app").update({
+                    "bloqueado": False, 
+                    "status_pagamento": True,
+                    "id_pagamento_mp": None 
+                }).eq("id", user['id']).execute()
                 time.sleep(2)
                 st.rerun()
-            elif "point_of_interaction" in res:
-                dados_pix = res["point_of_interaction"]["transaction_data"]
-                qr_base64 = dados_pix["qr_code_base64"]
-                copia_cola = dados_pix["qr_code"]
-                
-                with st.container(border=True):
-                    c_img, c_info = st.columns([1, 2])
-                    c_img.image(f"data:image/jpeg;base64,{qr_base64}", width=200)
-                    c_info.info("Escaneie o QR Code ou copie o código abaixo:")
-                    c_info.code(copia_cola, language="text")
-                
-                if st.button("🔄 Verificar se aprovou"):
+
+            # SE ESTÁ PENDENTE (MOSTRA O QR CODE)
+            elif status == "pending":
+                if "point_of_interaction" in res:
+                    dados_pix = res["point_of_interaction"]["transaction_data"]
+                    qr_base64 = dados_pix["qr_code_base64"]
+                    copia_cola = dados_pix["qr_code"]
+                    
+                    with st.container(border=True):
+                        st.info("Aguardando confirmação do PIX...")
+                        c1, c2 = st.columns([1, 2])
+                        c1.image(f"data:image/jpeg;base64,{qr_base64}", width=180)
+                        c2.write("**Copie o código abaixo:**")
+                        c2.code(copia_cola, language="text")
+                        
+                        if st.button("🔄 Verificar se já pagou", width="stretch"):
+                            st.rerun()
+                        
+                        # Botão para cancelar esse PIX e gerar outro se der erro
+                        if st.button("❌ Cancelar e gerar novo PIX", type="secondary"):
+                            supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+                            supabase.table("usuarios_app").update({"id_pagamento_mp": None}).eq("id", user['id']).execute()
+                            st.rerun()
+            
+            # SE EXPIROU OU DEU ERRO
+            else:
+                st.warning("A cobrança anterior expirou.")
+                if st.button("Gerar Nova Cobrança"):
+                    supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+                    supabase.table("usuarios_app").update({"id_pagamento_mp": None}).eq("id", user['id']).execute()
                     st.rerun()
+
         except:
-            st.warning("Aguardando confirmação do banco...")
+            st.warning("Consultando status do pagamento...")
 
 def renderizar_edicao_perfil(supabase_client, user):
     """
