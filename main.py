@@ -6,271 +6,180 @@ import requests
 from supabase import create_client
 from datetime import datetime, timedelta
 import math 
+import threading
+import time
 
 # Importação dos módulos customizados
 from modules.ui import aplicar_estilo_css, exibir_logo_rodape, estilizar_botoes
 from modules.views import renderizar_tela_login, renderizar_tela_admin, renderizar_tela_bloqueio_financeiro, enviar_notificacao_treino, renderizar_edicao_perfil
 
+# Importação da sua função de processamento de fila
+try:
+    from processar_fila import processar_novos_treinos as processar_fila_treinos
+except ImportError:
+    st.error("Arquivo processar_fila.py não encontrado ou função ausente!")
+
 # ============================================================================
-# 1. CONFIGURAÇÕES DE PÁGINA E CONEXÃO
+# 1. CONFIGURAÇÕES E CONEXÃO
 # ============================================================================
-st.set_page_config(page_title="Zaptreino - Conecte seu movimento", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Zaptreino - Professor Hanada", layout="wide", page_icon="🏃‍♂️")
 
 try:
     supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 except Exception as e:
-    st.error(f"Erro ao conectar ao Banco de Dados: {e}")
+    st.error(f"Erro de conexão: {e}")
     st.stop()
 
 aplicar_estilo_css()
 estilizar_botoes()
 
 # ============================================================================
-# 2. CÉREBRO DO TREINADOR (LÓGICA DE TRIMP CIENTÍFICO)
+# 2. SERVIÇO VIGILANTE (BACKGROUND) - SILENCIOSO
 # ============================================================================
 
-def calcular_trimp_banister(duracao_min, fc_media, fc_max, fc_repouso=60):
-    if not fc_media or fc_media <= 0:
-        return int(duracao_min * 1.5) 
-        
-    if fc_max <= fc_repouso: fc_max = 190
-    b = 1.92 
-    reserva = (fc_media - fc_repouso) / (fc_max - fc_repouso)
-    
-    try:
-        trimp = duracao_min * reserva * 0.64 * math.exp(b * reserva)
-        return int(trimp)
-    except:
-        return int(duracao_min * 1.5)
+def servico_vigilante_5min():
+    """Roda em background APENAS para buscar treinos novos, sem spam de manutenção."""
+    while True:
+        try:
+            # Busca treinos no Strava. Se achar treino inédito, manda o Zap do treino.
+            processar_fila_treinos() 
+            print(f"✅ Ciclo Vigilante concluído silenciosamente: {datetime.now().strftime('%H:%M:%S')}")
+        except Exception as e:
+            print(f"❌ Erro no Vigilante: {e}")
+        time.sleep(10) # 5 minutos
 
-def processar_sincronizacao(auth_code, user_id):
-    try:
-        user_data = supabase.table("usuarios_app").select("data_nascimento").eq("id", user_id).execute()
-        fc_max_atleta = 190
-        
-        if user_data.data and user_data.data[0].get('data_nascimento'):
-            try:
-                ano_nasc = int(user_data.data[0]['data_nascimento'].split('-')[0])
-                fc_max_atleta = 220 - (datetime.now().year - ano_nasc)
-            except: pass
-            
-        response = requests.post(
-            "https://www.strava.com/api/v3/oauth/token",
-            data={
-                'client_id': st.secrets["STRAVA_CLIENT_ID"],
-                'client_secret': st.secrets["STRAVA_CLIENT_SECRET"],
-                'code': auth_code,
-                'grant_type': 'authorization_code'
-            }
-        ).json()
-        
-        token = response.get('access_token')
-        
-        if token:
-            dados_token = {
-                "user_id": user_id,
-                "athlete_id": response.get('athlete', {}).get('id'),
-                "access_token": token,
-                "refresh_token": response.get('refresh_token'),
-                "expires_at": response.get('expires_at'),
-                "updated_at": str(datetime.now())
-            }
-            supabase.table("auth_strava").upsert(dados_token).execute()
-        
-            headers = {'Authorization': f'Bearer {token}'}
-            atividades = requests.get("https://www.strava.com/api/v3/athlete/activities", 
-                                    headers=headers, params={'per_page': 5}).json()
-            
-            # --- NOVA LÓGICA: SÓ O ÚLTIMO TREINO ---
-            if atividades:
-                # Pegamos apenas a primeira atividade da lista (a mais recente)
-                ultima_act = atividades[0]
-                
-                if ultima_act['type'] in ['Run', 'VirtualRun', 'TrailRun', 'Ride', 'Walk', 'WeightTraining', 'Workout']:
-                    dist = round(ultima_act.get('distance', 0) / 1000, 2)
-                    dur_minutos = int(ultima_act.get('moving_time', 0) / 60)
-                    fc_media_treino = ultima_act.get('average_heartrate', 0)
-                    trimp_real = calcular_trimp_banister(dur_minutos, fc_media_treino, fc_max_atleta)
-                    
-                    dados = {
-                        "id_atleta": user_id,
-                        "strava_id": str(ultima_act['id']),
-                        "tipo_esporte": ultima_act['type'],
-                        "distancia": dist,
-                        "duracao": dur_minutos,
-                        "data_treino": ultima_act['start_date_local'][:10],
-                        "name": ultima_act.get('name', 'Treino'),
-                        "trimp_score": trimp_real 
-                    }
-                    
-                    # Salva no banco
-                    res_db = supabase.table("atividades_fisicas").upsert(dados, on_conflict="strava_id").execute()
-                    
-                    # 🚀 ENVIA WHATSAPP APENAS DESTA ÚLTIMA ATIVIDADE
-                    if res_db.data:
-                        dados_zap = {
-                            "distancia": f"{dist} km",
-                            "duracao": f"{dur_minutos} min",
-                            "trimp_semanal": f"{trimp_real} pts"
-                        }
-                        nome_atleta = st.session_state.user_info.get('nome', 'Atleta')
-                        enviar_notificacao_treino(dados_zap, nome_atleta)
-
-                # Processa as outras 4 atividades apenas para atualizar o banco (sem enviar Zap)
-                for act in atividades[1:]:
-                     if act['type'] in ['Run', 'VirtualRun', 'TrailRun', 'Ride', 'Walk', 'WeightTraining', 'Workout']:
-                        dist_outros = round(act.get('distance', 0) / 1000, 2)
-                        dur_outros = int(act.get('moving_time', 0) / 60)
-                        trimp_outros = calcular_trimp_banister(dur_outros, act.get('average_heartrate', 0), fc_max_atleta)
-                        
-                        dados_outros = {
-                            "id_atleta": user_id,
-                            "strava_id": str(act['id']),
-                            "tipo_esporte": act['type'],
-                            "distancia": dist_outros,
-                            "duracao": dur_outros,
-                            "data_treino": act['start_date_local'][:10],
-                            "name": act.get('name', 'Treino'),
-                            "trimp_score": trimp_outros
-                        }
-                        supabase.table("atividades_fisicas").upsert(dados_outros, on_conflict="strava_id").execute()
-            
-            return True
-        return False
-    except Exception as e:
-        st.error(f"Erro na sincronização: {e}")
-        return False
+# Impede que o robô reinicie ao clicar em 'Sair'
+if not hasattr(st, "vigilante_ativo"):
+    t = threading.Thread(target=servico_vigilante_5min, daemon=True)
+    t.start()
+    st.vigilante_ativo = True
 
 # ============================================================================
-# 3. GESTÃO DE SESSÃO E ROTEAMENTO OAUTH
+# 3. GESTÃO DE SESSÃO E OAUTH (CORRIGIDO CONNECT STRAVA)
 # ============================================================================
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
-q_params = st.query_params
-target_id = q_params.get("state") or q_params.get("session_id")
+params = st.query_params
+target_id = params.get("state") or params.get("session_id")
+auth_code = params.get("code") # Captura a resposta do botão Connect Strava
 
 if not st.session_state.logado and target_id:
     res = supabase.table("usuarios_app").select("*").eq("id", target_id).execute()
     if res.data:
         st.session_state.user_info = res.data[0]
         st.session_state.logado = True
-        auth_code = q_params.get("code")
+        
+        # 🚀 SE VOLTOU DO BOTÃO CONNECT STRAVA, SALVA O ACESSO NOVO AQUI!
         if auth_code:
-            if processar_sincronizacao(auth_code, target_id):
-                st.session_state['just_synced'] = True
-            st.query_params.clear()
-            st.query_params["session_id"] = target_id
-            st.rerun()
+            try:
+                response = requests.post("https://www.strava.com/api/v3/oauth/token",
+                    data={
+                        'client_id': st.secrets["STRAVA_CLIENT_ID"],
+                        'client_secret': st.secrets["STRAVA_CLIENT_SECRET"],
+                        'code': auth_code,
+                        'grant_type': 'authorization_code'
+                    }).json()
+
+                if 'access_token' in response:
+                    supabase.table("auth_strava").upsert({
+                        "user_id": target_id,
+                        "athlete_id": response.get('athlete', {}).get('id'),
+                        "access_token": response['access_token'],
+                        "refresh_token": response.get('refresh_token'),
+                        "expires_at": response.get('expires_at')
+                    }).execute()
+                    # Já processa os treinos desse usuário na hora
+                    processar_fila_treinos(target_id)
+            except Exception as e:
+                print(f"Erro no OAuth Strava: {e}")
+
+        st.query_params.clear()
+        st.query_params["session_id"] = target_id
+        st.rerun()
 
 # ============================================================================
-# 4. FUNÇÃO DE GRÁFICOS
+# 4. GRÁFICOS E UI
 # ============================================================================
 def gerar_grafico_analise(df, titulo, dias=7):
     df_temp = df.copy()
     df_temp['data_treino'] = pd.to_datetime(df_temp['data_treino']).dt.tz_localize(None)
-    
     hoje = datetime.now().replace(hour=23, minute=59, second=59)
-    data_inicio = hoje - timedelta(days=dias)
-    df_filtrado = df_temp[df_temp['data_treino'] >= data_inicio].sort_values('data_treino').copy()
-    
+    df_filtrado = df_temp[df_temp['data_treino'] >= (hoje - timedelta(days=dias))].sort_values('data_treino')
     if df_filtrado.empty: return None
     
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-    
-    fig.add_trace(go.Bar(x=df_filtrado['data_treino'], y=df_filtrado['distancia'], 
-                          name="Km", marker_color='lightgrey', opacity=0.5), secondary_y=True)
-                          
-    fig.add_trace(go.Scatter(x=df_filtrado['data_treino'], y=df_filtrado['trimp_score'], 
-                               name="Carga (TRIMP)", mode='lines+markers', line=dict(color='#FC4C02', width=3)), secondary_y=False)
-    
-    fig.update_layout(title_text=titulo, template="plotly_white", hovermode="x unified", showlegend=False, height=400, margin=dict(l=10, r=10, t=50, b=10))
-    fig.update_yaxes(title_text="Carga Interna (TRIMP)", secondary_y=False)
-    fig.update_yaxes(title_text="Distância (Km)", secondary_y=True, showgrid=False)
+    fig.add_trace(go.Bar(x=df_filtrado['data_treino'], y=df_filtrado['distancia'], name="Km", marker_color='lightgrey', opacity=0.5), secondary_y=True)
+    fig.add_trace(go.Scatter(x=df_filtrado['data_treino'], y=df_filtrado['trimp_score'], name="Carga", mode='lines+markers', line=dict(color='#FC4C02', width=3)), secondary_y=False)
+    fig.update_layout(template="plotly_white", height=350, margin=dict(l=10, r=10, t=50, b=10), showlegend=False, title=titulo)
     return fig
 
 # ============================================================================
-# 5. CONTROLE DE TELAS
+# 5. ROTEAMENTO DE TELAS
 # ============================================================================
-
 if not st.session_state.logado:
     renderizar_tela_login(supabase)
 else:
     user = st.session_state.user_info
     
+    # SIDEBAR
     with st.sidebar:
-        st.markdown(f"### DataPace Analytics")
-        st.write(f"👤 **{user['nome']}**")
-        
-        is_ativo = not user.get('bloqueado') and user.get('status_pagamento') != False
-        if is_ativo:
+        st.markdown(f"### DataPace\n👤 **{user['nome']}**")
+        if not user.get('bloqueado'):
             renderizar_edicao_perfil(supabase, user)
-            st.markdown("---") 
-            try:
-                client_id = st.secrets["STRAVA_CLIENT_ID"]
-                redirect_uri = st.secrets["STRAVA_REDIRECT_URI"]
-                link_strava = f"https://www.strava.com/oauth/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
-                st.markdown(f'''<a href="{link_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Connect Strava</button></a>''', unsafe_allow_html=True)
-            except:
-                st.error("Erro nas chaves do Strava.")
+            st.markdown("---")
+            url_strava = f"https://www.strava.com/oauth/authorize?client_id={st.secrets['STRAVA_CLIENT_ID']}&response_type=code&redirect_uri={st.secrets['STRAVA_REDIRECT_URI']}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
+            st.markdown(f'<a href="{url_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Connect Strava</button></a>', unsafe_allow_html=True)
         
         st.markdown("---")
-        if st.button("Sair da Conta", type="secondary", width='stretch'):
-            st.session_state.clear()
-            st.query_params.clear()
+        if st.button("Sair da Conta", width='stretch'):
+            st.session_state.clear() 
+            st.query_params.clear() 
             st.rerun()
 
+    # TELAS
     if user.get('is_admin'):
         renderizar_tela_admin(supabase)
-    elif user.get('bloqueado') or user.get('status_pagamento') == False:
+    elif user.get('bloqueado'):
         renderizar_tela_bloqueio_financeiro()
     else:
-        # Layout do Aluno
-        c1, c2 = st.columns([3, 1])
-        with c1:
-            st.title(f"Olá, {user['nome'].split()[0]}! 🏃‍♂️")
-        with c2:
-            if st.button("🔄 Atualizar Painel"):
-                st.cache_data.clear()
-                st.rerun()
+        # TELA DO ALUNO
+        if 'sync_inicial' not in st.session_state:
+            with st.spinner("Sincronizando treinos..."):
+                # 1. Busca os treinos SÓ do aluno que logou
+                processar_fila_treinos(user['id'])
+                
+                # 2. Envia a mensagem de manutenção SÓ para o aluno que logou (mantém Twilio ativo)
+                enviar_notificacao_treino({"manutencao": True}, user['nome'])
+                
+                st.session_state['sync_inicial'] = True
 
-        res_treinos = supabase.table("atividades_fisicas").select("*").eq("id_atleta", user['id']).order("data_treino", desc=True).execute()
+        st.title(f"E aí, {user['nome'].split()[0]}! ⚡")
         
-        if res_treinos.data:
-            df = pd.DataFrame(res_treinos.data)
-            df['data_treino'] = pd.to_datetime(df['data_treino']).dt.tz_localize(None)
+        res_t = supabase.table("atividades_fisicas").select("*").eq("id_atleta", user['id']).order("data_treino", desc=True).execute()
+        
+        if res_t.data:
+            df = pd.DataFrame(res_t.data)
             
-            if st.session_state.get('just_synced'):
-                st.session_state['just_synced'] = False
-                st.toast("Treinos sincronizados!", icon="📲")
-
             m1, m2, m3 = st.columns(3)
-            m1.metric("Total de Treinos", len(df))
-            m2.metric("Distância Total", f"{df['distancia'].sum():.1f} km")
-            m3.metric("Carga Média", f"{int(df['trimp_score'].mean())} pts")
+            m1.metric("Total Treinos", len(df))
+            m2.metric("Km Acumulados", f"{df['distancia'].sum():.1f}")
+            m3.metric("Carga Média", f"{int(df['trimp_score'].mean())}")
             
-            # --- TABELA FORMATADA (ARREDONDAMENTOS) ---
-            st.dataframe(
-                df.head(10)[['data_treino', 'name', 'distancia', 'duracao', 'trimp_score']], 
-                width='stretch',
-                hide_index=True,
-                column_config={
-                    "data_treino": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                    "name": "Atividade",
-                    "distancia": st.column_config.NumberColumn("Km", format="%.2f"),
-                    "duracao": st.column_config.NumberColumn("Min", format="%d"),
-                    "trimp_score": st.column_config.NumberColumn("TRIMP", format="%d"),
-                }
-            )
+            st.dataframe(df.head(10)[['data_treino', 'name', 'distancia', 'trimp_score']], 
+                         width='stretch', hide_index=True,
+                         column_config={
+                             "data_treino": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                             "distancia": st.column_config.NumberColumn("Km", format="%.2f"),
+                             "trimp_score": "Carga (TRIMP)"
+                         })
 
-            st.markdown("### 📊 Análise de Evolução")
-            col1, col2 = st.columns(2)
-            fig1 = gerar_grafico_analise(df, "Volume vs Esforço (Último ano)", 365)
-            fig2 = gerar_grafico_analise(df, "Consistência Histórica", 3650)
-            
-            if fig1: col1.plotly_chart(fig1, width='stretch')
-            if fig2: col2.plotly_chart(fig2, width='stretch')
+            c1, c2 = st.columns(2)
+            g1 = gerar_grafico_analise(df, "Últimos 30 dias", 30)
+            g2 = gerar_grafico_analise(df, "Evolução Anual", 365)
+            if g1: c1.plotly_chart(g1, width='stretch')
+            if g2: c2.plotly_chart(g2, width='stretch')
         else:
-            st.info("Conecte seu Strava para ver seus treinos.")
+            st.info("Nenhum treino encontrado. Conecte seu Strava!")
 
 exibir_logo_rodape()
