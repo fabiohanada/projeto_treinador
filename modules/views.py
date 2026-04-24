@@ -13,32 +13,39 @@ from supabase import create_client
 
 def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta=None):
     try:
-        # 1. Puxa as chaves (Garante que está pegando do lugar certo)
         sid = st.secrets.get("TWILIO_SID")
         token = st.secrets.get("TWILIO_TOKEN")
-        
-        # 2. Puxa os números e remove qualquer espaço em branco que possa ter vindo
         from_raw = str(st.secrets.get("TWILIO_PHONE_NUMBER")).strip()
-        to_raw = str(st.secrets.get("MEU_CELULAR")).strip()
+        
+        # Se vier o telefone do aluno, envia pra ele. Se não, manda para o admin.
+        if telefone_atleta:
+            tel_limpo = ''.join(filter(str.isdigit, str(telefone_atleta)))
+            if len(tel_limpo) <= 11:
+                tel_limpo = f"55{tel_limpo}"
+            to_number = f"whatsapp:+{tel_limpo}"
+        else:
+            to_raw = str(st.secrets.get("MEU_CELULAR")).strip()
+            to_number = f"whatsapp:+{to_raw}"
 
-        # 3. Formatação CRÍTICA: Precisa ter o 'whatsapp:+' antes do número
-        # O erro 63007 acontece se o número não bater exatamente com o que está no painel
         from_number = f"whatsapp:+{from_raw}"
-        to_number = f"whatsapp:+{to_raw}"
-
         client = Client(sid, token)
         
-        corpo_msg = (
-            f"🏃‍♂️ *Zaptreino Alerta*\n\n"
-            f"Fala {nome_atleta}, treino sincronizado!\n"
-            f"📏 Distância: {dados_treino.get('distancia')}\n"
-            f"⏱️ Tempo: {dados_treino.get('duracao')}\n"
-            f"📊 Carga 7d: {dados_treino.get('trimp_semanal', '-')}\n"
-            f"📈 Carga 30d: {dados_treino.get('trimp_mensal', '-')}\n\n"
-            f"Bora pra cima! 👊"
-        )
+        if dados_treino and dados_treino.get("manutencao"):
+            corpo_msg = (
+                f"🤖 *Zaptreino Online*\n\n"
+                f"Fala {nome_atleta}, o sistema está monitorando seu Strava! ✅"
+            )
+        else:
+            corpo_msg = (
+                f"🏃‍♂️ *Zaptreino Alerta*\n\n"
+                f"Fala {nome_atleta}, treino sincronizado!\n"
+                f"📏 Distância: {dados_treino.get('distancia', '-')} km\n"
+                f"⏱️ Tempo: {dados_treino.get('duracao', '-')} min\n"
+                f"📊 Carga 7d: {dados_treino.get('trimp_semanal', '-')}\n"
+                f"📈 Carga 30d: {dados_treino.get('trimp_mensal', '-')}\n\n"
+                f"Bora pra cima! 👊"
+            )
         
-        # 4. Disparo
         msg = client.messages.create(
             body=corpo_msg, 
             from_=from_number, 
@@ -46,8 +53,9 @@ def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta=None):
         )
         return True
     except Exception as e:
-        print(f"Erro no Twilio (Detalhado): {e}")
+        print(f"❌ Erro Crítico no Twilio: {e}")
         return False
+        
 
 # ============================================================================
 # 2. FUNÇÕES AUXILIARES DE BANCO
@@ -78,13 +86,10 @@ def alternar_bloqueio(supabase, user_id, status_atual_bloqueado):
 def renderizar_tela_login(supabase_client):
     st.markdown("""
         <style>
-        /* 1. Box Principal e Topo */
         .block-container {
             padding-top: 3rem !important;
             max-width: 650px !important;
         }
-
-        /* 2. Centraliza TÍTULOS dos campos (E-mail, Senha, etc) */
         div[data-testid="stForm"] label p {
             text-align: center !important;
             width: 100% !important;
@@ -92,14 +97,10 @@ def renderizar_tela_login(supabase_client):
             justify-content: center !important;
             font-weight: 500 !important;
         }
-
-        /* 3. Centraliza a caixa da LGPD */
         div[data-testid="stCheckbox"] {
             display: flex !important;
             justify-content: center !important;
         }
-
-        /* 4. PINTA O BOTÃO COM O LARANJA DO ZAPTREINO */
         div[data-testid="stFormSubmitButton"] button {
             background-color: #FF5722 !important; 
             border-color: #FF5722 !important;
@@ -109,14 +110,11 @@ def renderizar_tela_login(supabase_client):
             font-weight: bold !important;
             margin-top: 10px !important;
         }
-        
         div[data-testid="stFormSubmitButton"] button:hover {
             background-color: #E64A19 !important; 
             border-color: #E64A19 !important;
             color: white !important;
         }
-
-        /* 5. Centraliza Abas e pinta a linha debaixo delas de laranja */
         .stTabs [data-baseweb="tab-list"] {
             justify-content: center;
         }
@@ -127,10 +125,8 @@ def renderizar_tela_login(supabase_client):
         </style>
     """, unsafe_allow_html=True)
 
-    # Logo
     col_vazia1, col_logo, col_vazia2 = st.columns([0.5, 2, 0.5])
     with col_logo:
-        # CORREÇÃO 1: Substituído para width="stretch"
         st.image("assets/logo_zaptreino.png", width="stretch")
         
     st.markdown("<br>", unsafe_allow_html=True)
@@ -142,7 +138,6 @@ def renderizar_tela_login(supabase_client):
             email = st.text_input("E-mail")
             senha = st.text_input("Senha", type="password")
             
-            # CORREÇÃO 2: Substituído para width="stretch"
             if st.form_submit_button("Entrar", width="stretch"):
                 if not email or not senha:
                     st.warning("Preencha todos os campos.")
@@ -170,12 +165,12 @@ def renderizar_tela_login(supabase_client):
             novo_nome = st.text_input("Nome Completo")
             novo_email = st.text_input("E-mail")
             novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="+5511999999999")
-            # Como deve ficar o seu código na linha 167:
+            
             data_nasc = st.date_input(
                 "Data de Nascimento",
-                value=None,  # Começa vazio
-                min_value=date(1920, 1, 1), # Usando apenas date(...)
-                max_value=date.today(),      # Usando date.today()
+                value=None,
+                min_value=date(1920, 1, 1), 
+                max_value=date.today(),      
                 format="DD/MM/YYYY"
             )
             nova_senha = st.text_input("Defina uma Senha", type="password")
@@ -186,7 +181,6 @@ def renderizar_tela_login(supabase_client):
             st.markdown("<p style='text-align: center; color: gray; font-size: 14px;'>Ao clicar em aceitar, você concorda com os nossos Termos de Uso e Política de Privacidade (LGPD).</p>", unsafe_allow_html=True)
             aceite_termos = st.checkbox("Eu li e aceito os termos e condições.")
             
-            # CORREÇÃO 3: Substituído para width="stretch"
             botao_cadastrar = st.form_submit_button("Cadastrar", width="stretch")
             
             if botao_cadastrar:
@@ -218,26 +212,20 @@ def renderizar_tela_login(supabase_client):
 def renderizar_tela_admin(supabase_client):
     st.title("Painel Admin 🔒")
     
-    # Busca usuários
     try:
         users = supabase_client.table("usuarios_app").select("*").order("nome").execute().data
         if users:
             for user in users:
-                # Pula o administrador para ele não aparecer na lista
                 if user.get('is_admin'): continue
                 
                 with st.container(border=True):
-                    # Dividimos em 3 colunas para caber a Data de Vencimento no meio
                     c1, c2, c3 = st.columns([2, 1.5, 1.5])
                     
-                    # Coluna 1: Nome e Email
                     with c1:
-                        # Desce o texto levemente para alinhar com o input de data
                         st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
                         st.write(f"**{user['nome']}**")
                         st.caption(f"{user['email']}")
                     
-                    # --- 2. DATA DE VENCIMENTO ---
                     with c2:
                         venc_atual = user.get('data_vencimento')
                         try:
@@ -249,29 +237,22 @@ def renderizar_tela_admin(supabase_client):
                         if st.button("💾 Salvar Data", key=f"btn_venc_{user['id']}", width="stretch"):
                             atualizar_data_vencimento(supabase_client, user['id'], nova_data)
                     
-                    # --- 1. BOTÕES DE BLOQUEIO (AGORA ALINHADOS) ---
                     with c3:
-                        # MÁGICA DO ALINHAMENTO: Empurra o botão exatos 28px para baixo, 
-                        # compensando o espaço ocupado pela palavra "Vencimento" na coluna 2.
                         st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                         
                         if user.get('bloqueado'):
-                            # Botão Liberar (Verde/Padrão)
                             if st.button("🟢 Liberar", key=f"lib_{user['id']}", width="stretch"):
                                 alternar_bloqueio(supabase_client, user['id'], True)
                         else:
-                            # Botão Bloquear (Vermelho/Laranja com type="primary")
                             if st.button("🔴 Bloquear", key=f"bloq_{user['id']}", type="primary", width="stretch"):
                                 alternar_bloqueio(supabase_client, user['id'], False)
                     
-                    # --- 3. CAMPOS DE EDIÇÃO DOS ALUNOS ---
                     with st.expander("✏️ Editar / Excluir Aluno"):
                         with st.form(key=f"form_edit_{user['id']}"):
                             col_ed1, col_ed2 = st.columns(2)
                             ed_nome = col_ed1.text_input("Nome", value=user.get('nome', ''))
                             ed_tel = col_ed2.text_input("WhatsApp", value=user.get('telefone', ''))
                             
-                            # Botão de salvar a edição do aluno
                             if st.form_submit_button("💾 Atualizar Dados", width="stretch"):
                                 try:
                                     supabase_client.table("usuarios_app").update({
@@ -286,7 +267,6 @@ def renderizar_tela_admin(supabase_client):
                         
                         st.markdown("<br>", unsafe_allow_html=True)
                         
-                        # Botão de exclusão definitiva
                         if st.button("🗑️ Excluir Definitivamente", key=f"del_{user['id']}", type="primary", width="stretch"):
                             try:
                                 supabase_client.table("usuarios_app").delete().eq("id", user['id']).execute()
@@ -313,10 +293,7 @@ def renderizar_tela_bloqueio_financeiro():
     if not token_mp:
         st.error("Erro de configuração do Pagamento. Contate o suporte.")
         return
-
-    # --- LÓGICA DE GERAÇÃO E VERIFICAÇÃO ---
     
-    # 1. SE NÃO EXISTE ID OU SE O BOTÃO DE "GERAR NOVA" FOR CLICADO
     if not user.get('id_pagamento_mp'):
         if st.button("💠 Gerar Cobrança PIX (R$ 10,00)", width="stretch"):
             with st.spinner("Gerando QR Code..."):
@@ -337,7 +314,6 @@ def renderizar_tela_bloqueio_financeiro():
                     if "id" in res:
                         mp_id = str(res["id"])
                         supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-                        # Atualiza no banco para o código sair deste IF na próxima rodada
                         supabase.table("usuarios_app").update({"id_pagamento_mp": mp_id}).eq("id", user['id']).execute()
                         st.session_state.user_info['id_pagamento_mp'] = mp_id
                         st.rerun()
@@ -345,9 +321,8 @@ def renderizar_tela_bloqueio_financeiro():
                         st.error(f"Erro ao gerar: {res.get('message')}")
                 except Exception as e:
                     st.error(f"Erro de conexão: {e}")
-        st.stop() # Garante que não mostre nada abaixo enquanto não houver ID
+        st.stop() 
 
-    # 2. SE JÁ EXISTE UM ID, BUSCA O STATUS E MOSTRA O QR CODE
     else:
         mp_id = user['id_pagamento_mp']
         url = f"https://api.mercadopago.com/v1/payments/{mp_id}"
@@ -357,7 +332,6 @@ def renderizar_tela_bloqueio_financeiro():
             res = requests.get(url, headers=headers).json()
             status = res.get("status")
 
-            # SE JÁ PAGOU
             if status == "approved":
                 st.success("✅ Pagamento Aprovado! Liberando acesso...")
                 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
@@ -369,7 +343,6 @@ def renderizar_tela_bloqueio_financeiro():
                 time.sleep(2)
                 st.rerun()
 
-            # SE ESTÁ PENDENTE (MOSTRA O QR CODE)
             elif status == "pending":
                 if "point_of_interaction" in res:
                     dados_pix = res["point_of_interaction"]["transaction_data"]
@@ -386,13 +359,11 @@ def renderizar_tela_bloqueio_financeiro():
                         if st.button("🔄 Verificar se já pagou", width="stretch"):
                             st.rerun()
                         
-                        # Botão para cancelar esse PIX e gerar outro se der erro
                         if st.button("❌ Cancelar e gerar novo PIX", type="secondary"):
                             supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
                             supabase.table("usuarios_app").update({"id_pagamento_mp": None}).eq("id", user['id']).execute()
                             st.rerun()
             
-            # SE EXPIROU OU DEU ERRO
             else:
                 st.warning("A cobrança anterior expirou.")
                 if st.button("Gerar Nova Cobrança"):
@@ -404,12 +375,6 @@ def renderizar_tela_bloqueio_financeiro():
             st.warning("Consultando status do pagamento...")
 
 def renderizar_edicao_perfil(supabase_client, user):
-    """
-    Renderiza um formulário retrátil para o atleta editar seus próprios dados.
-    """
-    # ==========================================================
-    # 1. BUSCA O VENCIMENTO DIRETO DO BANCO DE DADOS
-    # ==========================================================
     vencimento_banco = None
     try:
         res = supabase_client.table("usuarios_app").select("data_vencimento").eq("id", user['id']).execute()
@@ -421,7 +386,6 @@ def renderizar_edicao_perfil(supabase_client, user):
     if not vencimento_banco:
         vencimento_banco = user.get("data_vencimento")
 
-    # Formata a data para exibir
     if vencimento_banco:
         try:
             data_obj = datetime.strptime(str(vencimento_banco).strip(), '%Y-%m-%d')
@@ -431,13 +395,11 @@ def renderizar_edicao_perfil(supabase_client, user):
     else:
         data_texto = "Data não definida"
 
-    # MOSTRA A DATA EM DESTAQUE LARANJA
     st.markdown(f"""
         <div style='background-color: #FFF3E0; border-left: 5px solid #FC4C02; padding: 10px; border-radius: 5px; margin-bottom: 15px;'>
             <h4 style='color: #FC4C02; margin: 0; font-size: 16px;'>📅 Vencimento do Plano: {data_texto}</h4>
         </div>
     """, unsafe_allow_html=True)
-    # ==========================================================
 
     with st.expander("⚙️ Editar Meus Dados / Senha", expanded=False):
         with st.form(key="form_edit_proprio_perfil"):
