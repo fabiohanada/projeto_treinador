@@ -23,13 +23,11 @@ def calcular_trimp_banister(duracao_min, fc_media, fc_max, fc_repouso=60):
         return int(trimp)
     except: return int(duracao_min * 1.5)
 
-# 🚀 NOVA FUNÇÃO: Calcula quanto o aluno já treinou no passado
 def buscar_acumulados_trimp(user_id, trimp_atual):
     hoje = datetime.now()
     uma_semana = (hoje - timedelta(days=7)).strftime('%Y-%m-%d')
     um_mes = (hoje - timedelta(days=30)).strftime('%Y-%m-%d')
 
-    # Busca treinos dos últimos 30 dias
     res = supabase.table("atividades_fisicas").select("trimp_score, data_treino").eq("id_atleta", user_id).gte("data_treino", um_mes).execute()
     
     total_7d = trimp_atual
@@ -39,7 +37,6 @@ def buscar_acumulados_trimp(user_id, trimp_atual):
         for treino in res.data:
             score = treino.get('trimp_score', 0)
             data_t = treino.get('data_treino')
-            
             if data_t >= uma_semana:
                 total_7d += score
             total_30d += score
@@ -79,24 +76,36 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                 for act in atividades:
                     strava_id = str(act['id'])
                     existe = supabase.table("atividades_fisicas").select("id, notificacao").eq("strava_id", strava_id).execute()
-
                     ja_notificado = existe.data[0].get('notificacao', False) if existe.data else False
 
                     if not existe.data or (origem_botao and not ja_notificado):
                         dist = act.get('distance', 0) / 1000
                         dur_min = int(act.get('moving_time', 0) / 60)
-                        
                         if dur_min < 5 and dist < 0.5: continue 
 
                         trimp_atual = calcular_trimp_banister(dur_min, act.get('average_heartrate', 0), 190)
-                        
-                        # 🚀 MÁGICA: Calcula os acumulados ANTES de salvar
                         t_semanal, t_mensal = buscar_acumulados_trimp(user_id, trimp_atual)
+
+                        # --- 🚀 LÓGICA DO SEMÁFORO E ALERTAS ESPECÍFICOS ---
+                        emoji_dia = "🟢" if trimp_atual <= 70 else "🟡" if trimp_atual <= 150 else "🔴"
+                        emoji_sem = "🟢" if t_semanal <= 400 else "🟡" if t_semanal <= 800 else "🔴"
+                        emoji_men = "🟢" if t_mensal <= 1500 else "🟡" if t_mensal <= 3000 else "🔴"
+
+                        alertas = []
+                        if emoji_dia == "🔴": alertas.append(f"Treino Atual ({trimp_atual})")
+                        if emoji_sem == "🔴": alertas.append(f"Carga 7 dias ({t_semanal})")
+                        if emoji_men == "🔴": alertas.append(f"Carga 30 dias ({t_mensal})")
+
+                        aviso_seg = ""
+                        if alertas:
+                            texto_alertas = " e ".join(alertas)
+                            aviso_seg = f"\n\n⚠️ *Atenção:* Sua carga de {texto_alertas} está alta! Se sentir dor ou cansaço excessivo, fale com o Prof. Fabio Hanada. 👊"
 
                         data_bruta = act.get('start_date_local', '')
                         data_limpa = data_bruta[:10] if data_bruta else None
 
-                        dados_treino = {
+                        # 1. Dados para salvar no BANCO (Colunas existentes)
+                        dados_banco = {
                             "id_atleta": user_id, 
                             "strava_id": strava_id,
                             "data_treino": data_limpa,
@@ -104,25 +113,32 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                             "duracao": dur_min,
                             "name": act.get('name'), 
                             "trimp_score": trimp_atual,
-                            "trimp_semanal": t_semanal, # Salva no banco!
-                            "trimp_mensal": t_mensal,   # Salva no banco!
+                            "trimp_semanal": t_semanal,
+                            "trimp_mensal": t_mensal,
                             "notificacao": True
                         }
+
+                        # 2. Dados extras para o WHATSAPP
+                        dados_notificacao = dados_banco.copy()
+                        dados_notificacao.update({
+                            "duracao_formatada": f"{dur_min//60:02d}:{dur_min%60:02d}",
+                            "emoji_dia": emoji_dia,
+                            "emoji_semana": emoji_sem,
+                            "emoji_mensal": emoji_men,
+                            "aviso_seguranca": aviso_seg
+                        })
                         
                         if not existe.data:
-                            supabase.table("atividades_fisicas").insert(dados_treino).execute()
+                            supabase.table("atividades_fisicas").insert(dados_banco).execute()
                         else:
-                            supabase.table("atividades_fisicas").update(dados_treino).eq("strava_id", strava_id).execute()
+                            supabase.table("atividades_fisicas").update(dados_banco).eq("strava_id", strava_id).execute()
                         
-                        # Dispara o Zap
                         from modules.views import enviar_notificacao_treino
                         u_info = supabase.table("usuarios_app").select("nome, telefone").eq("id", user_id).execute()
-                        
                         nome_atleta = u_info.data[0].get('nome', 'Atleta') if u_info.data else "Atleta"
                         tel_atleta = u_info.data[0].get('telefone') if u_info.data else None
-                            
-                        # Agora o Zap vai levar os dados de trimp_semanal e trimp_mensal que estão no dicionário!
-                        enviar_notificacao_treino(dados_treino, nome_atleta, tel_atleta)
+                        
+                        enviar_notificacao_treino(dados_notificacao, nome_atleta, tel_atleta)
 
     except Exception as e:
         print(f"❌ Erro Fila: {e}")
@@ -130,4 +146,4 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
 if __name__ == "__main__":
     while True:
         processar_novos_treinos()
-        time.sleep(1800)
+        time.sleep(300)

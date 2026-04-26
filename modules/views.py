@@ -17,7 +17,6 @@ def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta=None):
         token = st.secrets.get("TWILIO_TOKEN")
         from_raw = str(st.secrets.get("TWILIO_PHONE_NUMBER")).strip()
         
-        # Se vier o telefone do aluno, envia pra ele. Se não, manda para o admin.
         if telefone_atleta:
             tel_limpo = ''.join(filter(str.isdigit, str(telefone_atleta)))
             if len(tel_limpo) <= 11:
@@ -36,26 +35,47 @@ def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta=None):
                 f"Fala {nome_atleta}, o sistema está monitorando seu Strava! ✅"
             )
         else:
+            # Pegando os dados vindos do processar_fila
+            dist = dados_treino.get('distancia', '-')
+            tempo = dados_treino.get('duracao_formatada', '00:00')
+            t_atual = dados_treino.get('trimp_score', 0)
+            e_atual = dados_treino.get('emoji_dia', '🟢')
+            t_sem = dados_treino.get('trimp_semanal', '-')
+            e_sem = dados_treino.get('emoji_semana', '')
+            t_men = dados_treino.get('trimp_mensal', '-')
+            e_men = dados_treino.get('emoji_mensal', '')
+            
+            # --- AJUSTES SOLICITADOS ---
+            
+            # Amarelo: Data do treino (ajustando formato para DD/MM/AA)
+            data_raw = dados_treino.get('data_treino', datetime.now().strftime('%Y-%m-%d'))
+            try:
+                data_obj = datetime.strptime(data_raw, '%Y-%m-%d')
+                data_formatada = data_obj.strftime('%d/%m/%y')
+            except:
+                data_formatada = data_raw
+
+            # Verde: O aviso já vem específico do robô (ex: "Sua carga de Treino Atual (80) está alta")
+            aviso_especifico = dados_treino.get('aviso_seguranca', '')
+
             corpo_msg = (
                 f"🏃‍♂️ *Zaptreino Alerta*\n\n"
-                f"Fala {nome_atleta}, treino sincronizado!\n"
-                f"📏 Distância: {dados_treino.get('distancia', '-')} km\n"
-                f"⏱️ Tempo: {dados_treino.get('duracao', '-')} min\n"
-                f"📊 Carga 7d: {dados_treino.get('trimp_semanal', '-')}\n"
-                f"📈 Carga 30d: {dados_treino.get('trimp_mensal', '-')}\n\n"
+                f"Fala {nome_atleta}, *novo* treino sincronizado! 🔵\n" # Azul
+                f"📅 *Data do treino:* {data_formatada}\n" # Amarelo
+                f"📏 Distância: {dist} km\n"
+                f"⏱️ Tempo: {tempo}\n"
+                f"🔥 *Carga Treino Atual:* {t_atual} {e_atual}\n\n" # Vermelho
+                f"📊 *Carga 7d:* {t_sem} {e_sem}\n"
+                f"📈 *Carga 30d:* {t_men} {e_men}"
+                f"{aviso_especifico}\n\n" # Verde (Aparece apenas se houver algum 'vermelho')
                 f"Bora pra cima! 👊"
             )
         
-        msg = client.messages.create(
-            body=corpo_msg, 
-            from_=from_number, 
-            to=to_number
-        )
+        client.messages.create(body=corpo_msg, from_=from_number, to=to_number)
         return True
     except Exception as e:
         print(f"❌ Erro Crítico no Twilio: {e}")
         return False
-        
 
 # ============================================================================
 # 2. FUNÇÕES AUXILIARES DE BANCO
@@ -127,7 +147,7 @@ def renderizar_tela_login(supabase_client):
 
     col_vazia1, col_logo, col_vazia2 = st.columns([0.5, 2, 0.5])
     with col_logo:
-        st.image("assets/logo_zaptreino.png", width="stretch")
+       st.image("assets/logo_zaptreino.png", width='stretch')
         
     st.markdown("<br>", unsafe_allow_html=True)
 

@@ -160,7 +160,7 @@ else:
             st.markdown(f'<a href="{url_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Connect Strava</button></a>', unsafe_allow_html=True)
         
         st.markdown("---")
-        if st.button("Sair da Conta", use_container_width=True):
+        if st.button("Sair da Conta", width='stretch'):
             st.session_state.clear() 
             st.query_params.clear() 
             st.rerun()
@@ -178,7 +178,7 @@ else:
 
         st.title(f"E aí, {user['nome'].split()[0]}! ⚡")
         
-        # 🚀 BUSCA ATUALIZADA: Incluindo trimp_semanal e trimp_mensal
+        # BUSCA ATUALIZADA
         res_t = supabase.table("atividades_fisicas").select(
             "data_treino, name, distancia, duracao, trimp_score, trimp_semanal, trimp_mensal"
         ).eq("id_atleta", user['id']).order("data_treino", desc=True).execute()
@@ -193,26 +193,50 @@ else:
             m2.metric("Km Acumulados", f"{df['distancia'].sum():.1f}")
             m3.metric("Carga Média", f"{int(df['trimp_score'].mean())}")
             
-            # 🚀 TABELA FINAL ATUALIZADA COM AS DUAS NOVAS COLUNAS
-            st.dataframe(df.head(10), 
-                         use_container_width=True, 
-                         hide_index=True,
-                         column_order=("data_treino", "name", "distancia", "duracao_formatada", "trimp_score", "trimp_semanal", "trimp_mensal"),
-                         column_config={
-                             "data_treino": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                             "name": "Atividade",
-                             "distancia": st.column_config.NumberColumn("Km", format="%.2f"),
-                             "duracao_formatada": "Duração",
-                             "trimp_score": "Carga (TRIMP)",
-                             "trimp_semanal": "Carga (7 dias)",
-                             "trimp_mensal": "Carga (30 dias)"
-                         })
+            # 🚀 LÓGICA DE CENTRALIZAÇÃO E SEMÁFOROS NA TABELA
+            def formatar_carga(valor, tipo):
+                if pd.isna(valor) or valor == 0: return "-"
+                if tipo == 'dia':
+                    emoji = "🟢" if valor <= 70 else "🟡" if valor <= 150 else "🔴"
+                elif tipo == 'sem':
+                    emoji = "🟢" if valor <= 400 else "🟡" if valor <= 800 else "🔴"
+                else: # mensal
+                    emoji = "🟢" if valor <= 1500 else "🟡" if valor <= 3000 else "🔴"
+                return f"{int(valor)} {emoji}"
+
+            # Criando colunas de exibição formatadas
+            df['Carga Diária'] = df['trimp_score'].apply(lambda x: formatar_carga(x, 'dia'))
+            df['Carga 7 Dias'] = df['trimp_semanal'].apply(lambda x: formatar_carga(x, 'sem'))
+            df['Carga 30 Dias'] = df['trimp_mensal'].apply(lambda x: formatar_carga(x, 'men'))
+
+            st.dataframe(
+                df[['data_treino', 'name', 'distancia', 'duracao_formatada', 'Carga Diária', 'Carga 7 Dias', 'Carga 30 Dias']].head(15), 
+                width='stretch', 
+                hide_index=True,
+                column_config={
+                    "data_treino": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                    "name": st.column_config.TextColumn("Atividade", width="large"),
+                    "distancia": st.column_config.NumberColumn("Km", format="%.2f"),
+                    "duracao_formatada": st.column_config.TextColumn("Tempo"),
+                    "Carga Diária": st.column_config.TextColumn("TRIMP 🟢", help="Carga do treino individual"),
+                    "Carga 7 Dias": st.column_config.TextColumn("7 Dias 📊", help="Acumulado da semana"),
+                    "Carga 30 Dias": st.column_config.TextColumn("30 Dias 📈", help="Acumulado do mês"),
+                }
+            )
+
+            # Legenda Explicativa
+            st.markdown("---")
+            with st.expander("❓ Entenda as Cores da Carga (Semáforo)"):
+                c1, c2, c3 = st.columns(3)
+                c1.info("**Individual**\n\n🟢 < 70\n\n🟡 71-150\n\n🔴 > 150")
+                c2.warning("**Semanal**\n\n🟢 < 400\n\n🟡 401-800\n\n🔴 > 800")
+                c3.error("**Mensal**\n\n🟢 < 1500\n\n🟡 1501-3000\n\n🔴 > 3000")
 
             c1, c2 = st.columns(2)
-            g1 = gerar_grafico_analise(df, "Últimos 30 dias", 30)
-            g2 = gerar_grafico_analise(df, "Evolução Anual", 365)
-            if g1: c1.plotly_chart(g1, use_container_width=True)
-            if g2: c2.plotly_chart(g2, use_container_width=True)
+            g1 = gerar_grafico_analise(df, "Últimos 7 dias", 7)
+            g2 = gerar_grafico_analise(df, "Últinos 30 dias", 30)
+            if g1: c1.plotly_chart(g1, width='stretch')
+            if g2: c2.plotly_chart(g2, width='stretch')
         else:
             st.info("Nenhum treino encontrado. Conecte seu Strava!")
 
