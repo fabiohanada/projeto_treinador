@@ -5,6 +5,7 @@ import math
 from supabase import create_client
 from twilio.rest import Client
 import streamlit as st
+import pandas as pd # Adicione esta importação para tratar datas
 
 # Configurações lidas do st.secrets
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -57,6 +58,26 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
 
         for u in usuarios:
             user_id = u['user_id']
+            
+            # --- [NOVA TRAVA FINANCEIRA] ---
+            # Busca os dados do usuário para checar bloqueio e vencimento
+            u_info_db = supabase.table("usuarios_app").select("nome, telefone, bloqueado, data_vencimento").eq("id", user_id).execute()
+            if u_info_db.data:
+                u_data = u_info_db.data[0]
+                hoje_date = datetime.now().date()
+                
+                # Converte data de vencimento
+                try:
+                    venc_date = pd.to_datetime(u_data['data_vencimento']).date() if u_data['data_vencimento'] else hoje_date
+                except:
+                    venc_date = hoje_date
+
+                # Se estiver bloqueado ou vencido, pula o processamento deste usuário
+                if u_data.get('bloqueado') or hoje_date > venc_date:
+                    print(f"🚫 [{tipo}] {u_data['nome']} ignorado (Bloqueado ou Vencido).")
+                    continue 
+            # --- [FIM DA TRAVA] ---
+
             token = u['access_token']
             
             # Refresh Token
@@ -78,7 +99,9 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                     existe = supabase.table("atividades_fisicas").select("id, notificacao").eq("strava_id", strava_id).execute()
                     ja_notificado = existe.data[0].get('notificacao', False) if existe.data else False
 
-                    if not existe.data or (origem_botao and not ja_notificado):
+                    # --- [NOVA LÓGICA DO BOTÃO] ---
+                    # Só entra se for treino novo OU se o botão foi clicado (para atualizar gráficos)
+                    if not existe.data or origem_botao:
                         dist = act.get('distance', 0) / 1000
                         dur_min = int(act.get('moving_time', 0) / 60)
                         if dur_min < 5 and dist < 0.5: continue 
@@ -86,7 +109,6 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                         trimp_atual = calcular_trimp_banister(dur_min, act.get('average_heartrate', 0), 190)
                         t_semanal, t_mensal = buscar_acumulados_trimp(user_id, trimp_atual)
 
-                        # --- 🚀 LÓGICA DO SEMÁFORO E ALERTAS ESPECÍFICOS ---
                         emoji_dia = "🟢" if trimp_atual <= 70 else "🟡" if trimp_atual <= 150 else "🔴"
                         emoji_sem = "🟢" if t_semanal <= 400 else "🟡" if t_semanal <= 800 else "🔴"
                         emoji_men = "🟢" if t_mensal <= 1500 else "🟡" if t_mensal <= 3000 else "🔴"
@@ -104,7 +126,6 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                         data_bruta = act.get('start_date_local', '')
                         data_limpa = data_bruta[:10] if data_bruta else None
 
-                        # 1. Dados para salvar no BANCO (Colunas existentes)
                         dados_banco = {
                             "id_atleta": user_id, 
                             "strava_id": strava_id,
@@ -118,7 +139,6 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                             "notificacao": True
                         }
 
-                        # 2. Dados extras para o WHATSAPP
                         dados_notificacao = dados_banco.copy()
                         dados_notificacao.update({
                             "duracao_formatada": f"{dur_min//60:02d}:{dur_min%60:02d}",
@@ -130,15 +150,13 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                         
                         if not existe.data:
                             supabase.table("atividades_fisicas").insert(dados_banco).execute()
+                            # Notifica apenas treinos novos
+                            from modules.views import enviar_notificacao_treino
+                            enviar_notificacao_treino(dados_notificacao, u_data['nome'], u_data.get('telefone'))
                         else:
+                            # Treino já existe: apenas atualiza os dados para o gráfico (sem enviar WhatsApp de novo)
                             supabase.table("atividades_fisicas").update(dados_banco).eq("strava_id", strava_id).execute()
-                        
-                        from modules.views import enviar_notificacao_treino
-                        u_info = supabase.table("usuarios_app").select("nome, telefone").eq("id", user_id).execute()
-                        nome_atleta = u_info.data[0].get('nome', 'Atleta') if u_info.data else "Atleta"
-                        tel_atleta = u_info.data[0].get('telefone') if u_info.data else None
-                        
-                        enviar_notificacao_treino(dados_notificacao, nome_atleta, tel_atleta)
+                            print(f"📊 Dados de {u_data['nome']} atualizados via botão (sem novo Zap).")
 
     except Exception as e:
         print(f"❌ Erro Fila: {e}")

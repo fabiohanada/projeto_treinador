@@ -144,20 +144,35 @@ def gerar_grafico_analise(df, titulo, dias=7):
     return fig
 
 # ============================================================================
-# 5. ROTEAMENTO DE TELAS
+# 5. ROTEAMENTO DE TELAS (AJUSTADO)
 # ============================================================================
 if not st.session_state.logado:
     renderizar_tela_login(supabase)
 else:
     user = st.session_state.user_info
     
+    # --- LÓGICA DE BLOQUEIO POR DATA E MANUAL ---
+    hoje_data = datetime.now().date()
+    data_venc_banco = user.get('data_vencimento')
+    
+    try:
+        vencimento = pd.to_datetime(data_venc_banco).date() if data_venc_banco else hoje_data
+    except:
+        vencimento = hoje_data
+
+    # Regras de bloqueio
+    plano_expirado = hoje_data > vencimento
+    bloqueado_manual = user.get('bloqueado', False)
+    
     with st.sidebar:
         st.markdown(f"### DataPace\n👤 **{user['nome']}**")
-        if not user.get('bloqueado'):
+        
+        # Só permite editar perfil e conectar Strava se NÃO estiver bloqueado/vencido
+        if not (bloqueado_manual or plano_expirado) or user.get('is_admin'):
             renderizar_edicao_perfil(supabase, user)
             st.markdown("---")
             url_strava = f"https://www.strava.com/oauth/authorize?client_id={st.secrets['STRAVA_CLIENT_ID']}&response_type=code&redirect_uri={st.secrets['STRAVA_REDIRECT_URI']}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
-            st.markdown(f'<a href="{url_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Connect Strava</button></a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="{url_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Sincronizar Strava</button></a>', unsafe_allow_html=True)
         
         st.markdown("---")
         if st.button("Sair da Conta", width='stretch'):
@@ -165,12 +180,17 @@ else:
             st.query_params.clear() 
             st.rerun()
 
+    # --- ROTEAMENTO FINAL ---
     if user.get('is_admin'):
         renderizar_tela_admin(supabase)
-    elif user.get('bloqueado'):
+    
+    elif bloqueado_manual or plano_expirado:
+        # Se estiver vencido, mostra a tela de bloqueio e PARA a execução
         renderizar_tela_bloqueio_financeiro()
+        st.stop() # Importante: evita que o resto do código do aluno rode abaixo
+        
     else:
-        # TELA DO ALUNO
+        # TELA DO ALUNO (ACESSO LIBERADO)
         if 'sync_inicial' not in st.session_state:
             with st.spinner("Sincronizando seus treinos agora..."):
                 processar_fila_treinos(user['id'], origem_botao=True)
@@ -187,24 +207,21 @@ else:
             df = pd.DataFrame(res_t.data)
             df['duracao_formatada'] = df['duracao'].apply(lambda x: f"{int(x)//60:02d}:{int(x)%60:02d}" if pd.notna(x) else "00:00")
             
-            # Métricas de topo (Resumo)
             m1, m2, m3 = st.columns(3)
             m1.metric("Total Treinos", len(df))
             m2.metric("Km Acumulados", f"{df['distancia'].sum():.1f}")
             m3.metric("Carga Média", f"{int(df['trimp_score'].mean())}")
             
-            # 🚀 LÓGICA DE CENTRALIZAÇÃO E SEMÁFOROS NA TABELA
             def formatar_carga(valor, tipo):
                 if pd.isna(valor) or valor == 0: return "-"
                 if tipo == 'dia':
                     emoji = "🟢" if valor <= 70 else "🟡" if valor <= 150 else "🔴"
                 elif tipo == 'sem':
                     emoji = "🟢" if valor <= 400 else "🟡" if valor <= 800 else "🔴"
-                else: # mensal
+                else: 
                     emoji = "🟢" if valor <= 1500 else "🟡" if valor <= 3000 else "🔴"
                 return f"{int(valor)} {emoji}"
 
-            # Criando colunas de exibição formatadas
             df['Carga Diária'] = df['trimp_score'].apply(lambda x: formatar_carga(x, 'dia'))
             df['Carga 7 Dias'] = df['trimp_semanal'].apply(lambda x: formatar_carga(x, 'sem'))
             df['Carga 30 Dias'] = df['trimp_mensal'].apply(lambda x: formatar_carga(x, 'men'))
@@ -218,13 +235,12 @@ else:
                     "name": st.column_config.TextColumn("Atividade", width="large"),
                     "distancia": st.column_config.NumberColumn("Km", format="%.2f"),
                     "duracao_formatada": st.column_config.TextColumn("Tempo"),
-                    "Carga Diária": st.column_config.TextColumn("TRIMP 🟢", help="Carga do treino individual"),
-                    "Carga 7 Dias": st.column_config.TextColumn("7 Dias 📊", help="Acumulado da semana"),
-                    "Carga 30 Dias": st.column_config.TextColumn("30 Dias 📈", help="Acumulado do mês"),
+                    "Carga Diária": st.column_config.TextColumn("TRIMP 🟢"),
+                    "Carga 7 Dias": st.column_config.TextColumn("7 Dias 📊"),
+                    "Carga 30 Dias": st.column_config.TextColumn("30 Dias 📈"),
                 }
             )
 
-            # Legenda Explicativa
             st.markdown("---")
             with st.expander("❓ Entenda as Cores da Carga (Semáforo)"):
                 c1, c2, c3 = st.columns(3)
@@ -235,8 +251,8 @@ else:
             c1, c2 = st.columns(2)
             g1 = gerar_grafico_analise(df, "Últimos 7 dias", 7)
             g2 = gerar_grafico_analise(df, "Últinos 30 dias", 30)
-            if g1: c1.plotly_chart(g1, width='stretch')
-            if g2: c2.plotly_chart(g2, width='stretch')
+            if g1: c1.plotly_chart(g1, use_container_width=True)
+            if g2: c2.plotly_chart(g2, use_container_width=True)
         else:
             st.info("Nenhum treino encontrado. Conecte seu Strava!")
 
