@@ -5,7 +5,7 @@ import math
 from supabase import create_client
 from twilio.rest import Client
 import streamlit as st
-import pandas as pd # Adicione esta importação para tratar datas
+import pandas as pd
 
 # Configurações lidas do st.secrets
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -17,12 +17,23 @@ except Exception as e:
     print(f"⚠️ ERRO Supabase: {e}")
 
 def calcular_trimp_banister(duracao_min, fc_media, fc_max, fc_repouso=60):
-    if not fc_media or fc_media <= 0: return int(duracao_min * 1.5)
-    reserva = (fc_media - fc_repouso) / (fc_max - fc_repouso)
+    """Calcula a carga de treino baseada na FC Máxima individual do aluno."""
+    if not fc_media or fc_media <= 0: 
+        return int(duracao_min * 1.5)
+    
+    # Se fc_max não estiver preenchida no banco, usa 185 como padrão
+    max_heart = fc_max if fc_max and fc_max > 0 else 185
+    
     try:
+        reserva = (fc_media - fc_repouso) / (max_heart - fc_repouso)
+        # Garante que a reserva fique em um range lógico (0 a 1)
+        reserva = max(0, min(reserva, 1))
+        
         trimp = duracao_min * reserva * 0.64 * math.exp(1.92 * reserva)
         return int(trimp)
-    except: return int(duracao_min * 1.5)
+    except Exception as e:
+        print(f"Erro no cálculo TRIMP: {e}")
+        return int(duracao_min * 1.5)
 
 def buscar_acumulados_trimp(user_id, trimp_atual):
     hoje = datetime.now()
@@ -59,32 +70,40 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
         for u in usuarios:
             user_id = u['user_id']
             
-            # --- [NOVA TRAVA FINANCEIRA] ---
-            # Busca os dados do usuário para checar bloqueio e vencimento
-            u_info_db = supabase.table("usuarios_app").select("nome, telefone, bloqueado, data_vencimento").eq("id", user_id).execute()
-            if u_info_db.data:
-                u_data = u_info_db.data[0]
-                hoje_date = datetime.now().date()
+            # --- [BUSCA DADOS DO ALUNO + FC MÁXIMA] ---
+            u_info_db = supabase.table("usuarios_app").select("nome, telefone, bloqueado, data_vencimento, fc_maxima").eq("id", user_id).execute()
+            
+            if not u_info_db.data:
+                continue
                 
-                # Converte data de vencimento
-                try:
-                    venc_date = pd.to_datetime(u_data['data_vencimento']).date() if u_data['data_vencimento'] else hoje_date
-                except:
-                    venc_date = hoje_date
+            u_data = u_info_db.data[0]
+            hoje_date = datetime.now().date()
+            
+            # Captura FC Máxima do banco para o cálculo individualizado
+            fc_aluno = u_data.get('fc_maxima', 185)
 
-                # Se estiver bloqueado ou vencido, pula o processamento deste usuário
-                if u_data.get('bloqueado') or hoje_date > venc_date:
-                    print(f"🚫 [{tipo}] {u_data['nome']} ignorado (Bloqueado ou Vencido).")
-                    continue 
-            # --- [FIM DA TRAVA] ---
+            # Conversão de vencimento segura
+            try:
+                venc_date = pd.to_datetime(u_data['data_vencimento']).date() if u_data['data_vencimento'] else hoje_date
+            except:
+                venc_date = hoje_date
+
+            # Trava Financeira
+            if u_data.get('bloqueado') or hoje_date > venc_date:
+                print(f"🚫 [{tipo}] {u_data['nome']} ignorado (Bloqueado/Vencido).")
+                continue 
 
             token = u['access_token']
             
-            # Refresh Token
+            # Refresh Token do Strava
             if u.get('expires_at') and time.time() > (u['expires_at'] - 600):
                 res_refresh = requests.post("https://www.strava.com/api/v3/oauth/token",
-                    data={'client_id': st.secrets["STRAVA_CLIENT_ID"], 'client_secret': st.secrets["STRAVA_CLIENT_SECRET"],
-                          'refresh_token': u['refresh_token'], 'grant_type': 'refresh_token'}).json()
+                    data={
+                        'client_id': st.secrets["STRAVA_CLIENT_ID"], 
+                        'client_secret': st.secrets["STRAVA_CLIENT_SECRET"],
+                        'refresh_token': u['refresh_token'], 
+                        'grant_type': 'refresh_token'
+                    }).json()
                 if 'access_token' in res_refresh:
                     token = res_refresh['access_token']
                     supabase.table("auth_strava").update({"access_token": token, "expires_at": res_refresh['expires_at']}).eq("user_id", user_id).execute()
@@ -96,23 +115,28 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
             if isinstance(atividades, list):
                 for act in atividades:
                     strava_id = str(act['id'])
+                    nome_atividade = act.get('name', 'Treino') # <--- NOME DA ATIVIDADE CAPTURADO
+                    
                     existe = supabase.table("atividades_fisicas").select("id, notificacao").eq("strava_id", strava_id).execute()
-                    ja_notificado = existe.data[0].get('notificacao', False) if existe.data else False
-
-                    # --- [NOVA LÓGICA DO BOTÃO] ---
-                    # Só entra se for treino novo OU se o botão foi clicado (para atualizar gráficos)
+                    
+                    # Só processa se for treino novo OU se veio do botão de sincronismo
                     if not existe.data or origem_botao:
                         dist = act.get('distance', 0) / 1000
                         dur_min = int(act.get('moving_time', 0) / 60)
+                        
+                        # Ignora "treinos" de erro (menos de 500m ou 5min)
                         if dur_min < 5 and dist < 0.5: continue 
 
-                        trimp_atual = calcular_trimp_banister(dur_min, act.get('average_heartrate', 0), 190)
+                        # Cálculo do TRIMP usando a FC individual do aluno
+                        trimp_atual = calcular_trimp_banister(dur_min, act.get('average_heartrate', 0), fc_aluno)
                         t_semanal, t_mensal = buscar_acumulados_trimp(user_id, trimp_atual)
 
+                        # Semáforo de Carga
                         emoji_dia = "🟢" if trimp_atual <= 70 else "🟡" if trimp_atual <= 150 else "🔴"
                         emoji_sem = "🟢" if t_semanal <= 400 else "🟡" if t_semanal <= 800 else "🔴"
                         emoji_men = "🟢" if t_mensal <= 1500 else "🟡" if t_mensal <= 3000 else "🔴"
 
+                        # Mensagem de Alerta Profissional
                         alertas = []
                         if emoji_dia == "🔴": alertas.append(f"Treino Atual ({trimp_atual})")
                         if emoji_sem == "🔴": alertas.append(f"Carga 7 dias ({t_semanal})")
@@ -121,7 +145,7 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                         aviso_seg = ""
                         if alertas:
                             texto_alertas = " e ".join(alertas)
-                            aviso_seg = f"\n\n⚠️ *Atenção:* Sua carga de {texto_alertas} está alta! Se sentir dor ou cansaço excessivo, fale com o Prof. Fabio Hanada. 👊"
+                            aviso_seg = f"\n\n⚠️ *Atenção:* Sua carga de {texto_alertas} está alta! Se sentir cansaço excessivo, fale com o Prof. Fabio Hanada. 👊"
 
                         data_bruta = act.get('start_date_local', '')
                         data_limpa = data_bruta[:10] if data_bruta else None
@@ -132,13 +156,14 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                             "data_treino": data_limpa,
                             "distancia": round(dist, 2), 
                             "duracao": dur_min,
-                            "name": act.get('name'), 
+                            "name": nome_atividade, # <--- NOME SALVO NO BANCO
                             "trimp_score": trimp_atual,
                             "trimp_semanal": t_semanal,
                             "trimp_mensal": t_mensal,
                             "notificacao": True
                         }
 
+                        # Montagem do pacote para o WhatsApp
                         dados_notificacao = dados_banco.copy()
                         dados_notificacao.update({
                             "duracao_formatada": f"{dur_min//60:02d}:{dur_min%60:02d}",
@@ -149,14 +174,20 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                         })
                         
                         if not existe.data:
+                            # Insere treino novo
                             supabase.table("atividades_fisicas").insert(dados_banco).execute()
-                            # Notifica apenas treinos novos
-                            from modules.views import enviar_notificacao_treino
-                            enviar_notificacao_treino(dados_notificacao, u_data['nome'], u_data.get('telefone'))
+                            
+                            # ENVIA WHATSAPP (apenas se for treino novo)
+                            try:
+                                from modules.views import enviar_notificacao_treino
+                                enviar_notificacao_treino(dados_notificacao, u_data['nome'], u_data.get('telefone'))
+                                print(f"✅ Notificação enviada: {u_data['nome']} - {nome_atividade}")
+                            except Exception as e_zap:
+                                print(f"⚠️ Erro ao enviar WhatsApp: {e_zap}")
                         else:
-                            # Treino já existe: apenas atualiza os dados para o gráfico (sem enviar WhatsApp de novo)
+                            # Apenas atualiza dados para o gráfico (origem_botao=True)
                             supabase.table("atividades_fisicas").update(dados_banco).eq("strava_id", strava_id).execute()
-                            print(f"📊 Dados de {u_data['nome']} atualizados via botão (sem novo Zap).")
+                            print(f"📊 Gráficos de {u_data['nome']} atualizados.")
 
     except Exception as e:
         print(f"❌ Erro Fila: {e}")
@@ -164,4 +195,4 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
 if __name__ == "__main__":
     while True:
         processar_novos_treinos()
-        time.sleep(300)
+        time.sleep(300) # Verifica a cada 5 minutos

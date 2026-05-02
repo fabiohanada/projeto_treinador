@@ -174,12 +174,34 @@ else:
             url_strava = f"https://www.strava.com/oauth/authorize?client_id={st.secrets['STRAVA_CLIENT_ID']}&response_type=code&redirect_uri={st.secrets['STRAVA_REDIRECT_URI']}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
             st.markdown(f'<a href="{url_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Sincronizar Strava</button></a>', unsafe_allow_html=True)
         
-        st.markdown("---")
-        if st.button("Sair da Conta", width='stretch'):
+        # ============================================================
+            # NOVO BLOCO: ATIVAÇÃO DO WHATSAPP (TWILIO SANDBOX)
+            # ============================================================
+            st.markdown("---")
+            st.markdown("### 📲 Notificações")
+            
+            # Substitua pelos seus dados do Twilio Console
+            numero_sandbox = "14155238886"  # Ex: +14155238886
+            codigo_join = "join rule-buy"  # Ex: join apple-orange
+            
+            url_zap = f"https://wa.me/{numero_sandbox}?text={codigo_join}"
+            
+            st.info("Para receber análises no Zap, ative o robô clicando abaixo:")
+            st.markdown(f'''
+                <a href="{url_zap}" target="_blank">
+                    <button style="background-color:#25D366;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">
+                        ✅ ATIVAR WHATSAPP
+                    </button>
+                </a>
+            ''', unsafe_allow_html=True)
+            # ============================================================
+        # --- BOTÃO SAIR (MOVA PARA CÁ, FORA DO IF ACIMA) ---
+        st.sidebar.markdown("---") # Uma linha divisória para separar bem
+        if st.sidebar.button("Sair da Conta", width='stretch', key="btn_sair_fixo"):
             st.session_state.clear() 
             st.query_params.clear() 
             st.rerun()
-
+            
     # --- ROTEAMENTO FINAL ---
     if user.get('is_admin'):
         renderizar_tela_admin(supabase)
@@ -251,8 +273,8 @@ else:
             c1, c2 = st.columns(2)
             g1 = gerar_grafico_analise(df, "Últimos 7 dias", 7)
             g2 = gerar_grafico_analise(df, "Últinos 30 dias", 30)
-            if g1: c1.plotly_chart(g1, use_container_width=True)
-            if g2: c2.plotly_chart(g2, use_container_width=True)
+            if g1: c1.plotly_chart(g1, width='stretch')
+            if g2: c2.plotly_chart(g2, width='stretch')
         else:
             st.info("Nenhum treino encontrado. Conecte seu Strava!")
 
