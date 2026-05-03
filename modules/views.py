@@ -2,7 +2,7 @@ import streamlit as st
 import time
 import requests
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from twilio.rest import Client
 import re
 from supabase import create_client
@@ -35,7 +35,6 @@ def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta=None):
                 f"Fala {nome_atleta}, o sistema está monitorando seu Strava! ✅"
             )
         else:
-            # Pegando os dados vindos do processar_fila
             dist = dados_treino.get('distancia', '-')
             tempo = dados_treino.get('duracao_formatada', '00:00')
             t_atual = dados_treino.get('trimp_score', 0)
@@ -44,30 +43,30 @@ def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta=None):
             e_sem = dados_treino.get('emoji_semana', '')
             t_men = dados_treino.get('trimp_mensal', '-')
             e_men = dados_treino.get('emoji_mensal', '')
+            nome_atividade = dados_treino.get('name', 'Treino')
             
-            # --- AJUSTES SOLICITADOS ---
-            
-            # Amarelo: Data do treino (ajustando formato para DD/MM/AA)
+            dias_pt = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
             data_raw = dados_treino.get('data_treino', datetime.now().strftime('%Y-%m-%d'))
             try:
                 data_obj = datetime.strptime(data_raw, '%Y-%m-%d')
-                data_formatada = data_obj.strftime('%d/%m/%y')
+                dia_semana = dias_pt[data_obj.weekday()]
+                data_formatada = f"{dia_semana}, {data_obj.strftime('%d/%m/%y')}"
             except:
                 data_formatada = data_raw
 
-            # Verde: O aviso já vem específico do robô (ex: "Sua carga de Treino Atual (80) está alta")
             aviso_especifico = dados_treino.get('aviso_seguranca', '')
 
             corpo_msg = (
                 f"🏃‍♂️ *Zaptreino Alerta*\n\n"
-                f"Fala {nome_atleta}, *novo* treino sincronizado! 🔵\n" # Azul
-                f"📅 *Data do treino:* {data_formatada}\n" # Amarelo
+                f"Fala {nome_atleta}, *novo* treino sincronizado! 🔵\n"
+                f"🏋️‍♂️ *Atividade:* {nome_atividade}\n"
+                f"📅 *Data:* {data_formatada}\n"
                 f"📏 Distância: {dist} km\n"
                 f"⏱️ Tempo: {tempo}\n"
-                f"🔥 *Carga Treino Atual:* {t_atual} {e_atual}\n\n" # Vermelho
+                f"🔥 *Carga Treino Atual:* {t_atual} {e_atual}\n\n"
                 f"📊 *Carga 7d:* {t_sem} {e_sem}\n"
                 f"📈 *Carga 30d:* {t_men} {e_men}"
-                f"{aviso_especifico}\n\n" # Verde (Aparece apenas se houver algum 'vermelho')
+                f"{aviso_especifico}\n\n"
                 f"Bora pra cima! 👊"
             )
         
@@ -83,10 +82,13 @@ def enviar_notificacao_treino(dados_treino, nome_atleta, telefone_atleta=None):
 
 def atualizar_data_vencimento(supabase, user_id, nova_data):
     try:
-        supabase.table("usuarios_app").update({"data_vencimento": str(nova_data)}).eq("id", str(user_id)).execute()
-        st.toast("Data salva!", icon="💾")
-    except:
-        st.toast("Erro ao salvar data.", icon="⚠️")
+        data_formatada = nova_data.strftime('%Y-%m-%d')
+        supabase.table("usuarios_app").update({"data_vencimento": data_formatada}).eq("id", str(user_id)).execute()
+        st.toast("Data salva com sucesso!", icon="💾")
+        time.sleep(0.5)
+        st.rerun()      
+    except Exception as e:
+        st.error(f"Erro detalhado do banco: {e}")
 
 def alternar_bloqueio(supabase, user_id, status_atual_bloqueado):
     novo_bloqueio = not status_atual_bloqueado
@@ -238,6 +240,17 @@ def renderizar_tela_admin(supabase_client):
             for user in users:
                 if user.get('is_admin'): continue
                 
+                hoje = date.today()
+                venc_atual = user.get('data_vencimento')
+                try:
+                    val_venc = datetime.strptime(str(venc_atual), '%Y-%m-%d').date() if venc_atual else hoje
+                except:
+                    val_venc = hoje
+                    
+                esta_expirado = hoje > val_venc
+                bloqueio_manual = user.get('bloqueado', False)
+                aluno_sem_acesso = esta_expirado or bloqueio_manual
+
                 with st.container(border=True):
                     c1, c2, c3 = st.columns([2, 1.5, 1.5])
                     
@@ -245,14 +258,10 @@ def renderizar_tela_admin(supabase_client):
                         st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
                         st.write(f"**{user['nome']}**")
                         st.caption(f"{user['email']}")
+                        if esta_expirado:
+                            st.caption("⚠️ Plano Vencido")
                     
                     with c2:
-                        venc_atual = user.get('data_vencimento')
-                        try:
-                            val_venc = datetime.strptime(str(venc_atual), '%Y-%m-%d').date() if venc_atual else date.today()
-                        except:
-                            val_venc = date.today()
-                            
                         nova_data = st.date_input("Vencimento", value=val_venc, key=f"data_{user['id']}")
                         if st.button("💾 Salvar Data", key=f"btn_venc_{user['id']}", width="stretch"):
                             atualizar_data_vencimento(supabase_client, user['id'], nova_data)
@@ -260,7 +269,7 @@ def renderizar_tela_admin(supabase_client):
                     with c3:
                         st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                         
-                        if user.get('bloqueado'):
+                        if aluno_sem_acesso:
                             if st.button("🟢 Liberar", key=f"lib_{user['id']}", width="stretch"):
                                 alternar_bloqueio(supabase_client, user['id'], True)
                         else:
@@ -269,21 +278,48 @@ def renderizar_tela_admin(supabase_client):
                     
                     with st.expander("✏️ Editar / Excluir Aluno"):
                         with st.form(key=f"form_edit_{user['id']}"):
+                            # Linha 1: Nome e WhatsApp
                             col_ed1, col_ed2 = st.columns(2)
-                            ed_nome = col_ed1.text_input("Nome", value=user.get('nome', ''))
-                            ed_tel = col_ed2.text_input("WhatsApp", value=user.get('telefone', ''))
+                            ed_nome = col_ed1.text_input("Nome", value=user.get('nome', ''), key=f"nome_{user['id']}")
+                            ed_tel = col_ed2.text_input("WhatsApp", value=user.get('telefone', ''), key=f"tel_{user['id']}")
+                            
+                            # Linha 2: E-mail e Nascimento
+                            col_ed3, col_ed4 = st.columns(2)
+                            ed_email = col_ed3.text_input("E-mail", value=user.get('email', ''), key=f"email_{user['id']}")
+                            
+                            data_nasc_atual = user.get('data_nascimento')
+                            try:
+                                val_nasc = datetime.strptime(str(data_nasc_atual), '%Y-%m-%d').date() if data_nasc_atual else date(1990, 1, 1)
+                            except:
+                                val_nasc = date(1990, 1, 1)
+                            ed_nasc = col_ed4.date_input("Nascimento", value=val_nasc, format="DD/MM/YYYY", key=f"nasc_{user['id']}")
+
+                            # Linha 3: Senha e Confirmação de Senha
+                            col_ed5, col_ed6 = st.columns(2)
+                            ed_senha = col_ed5.text_input("Nova Senha", type="password", key=f"senha_{user['id']}", help="Deixe em branco para manter a senha atual.")
+                            ed_conf_senha = col_ed6.text_input("Confirmar Nova Senha", type="password", key=f"conf_senha_{user['id']}")
                             
                             if st.form_submit_button("💾 Atualizar Dados", width="stretch"):
-                                try:
-                                    supabase_client.table("usuarios_app").update({
-                                        "nome": ed_nome,
-                                        "telefone": ed_tel
-                                    }).eq("id", user['id']).execute()
-                                    st.success("Aluno atualizado com sucesso!")
-                                    time.sleep(1)
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Erro ao atualizar: {e}")
+                                if ed_senha and ed_senha != ed_conf_senha:
+                                    st.error("❌ As senhas não coincidem. Tente novamente.")
+                                else:
+                                    try:
+                                        dados_update_admin = {
+                                            "nome": ed_nome,
+                                            "telefone": ed_tel,
+                                            "email": ed_email.strip().lower(),
+                                            "data_nascimento": str(ed_nasc)
+                                        }
+                                        # Só atualiza a senha se você digitou alguma coisa
+                                        if ed_senha:
+                                            dados_update_admin["senha"] = ed_senha
+
+                                        supabase_client.table("usuarios_app").update(dados_update_admin).eq("id", user['id']).execute()
+                                        st.success("Aluno atualizado com sucesso!")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Erro ao atualizar: {e}")
                         
                         st.markdown("<br>", unsafe_allow_html=True)
                         
@@ -322,11 +358,15 @@ def renderizar_tela_bloqueio_financeiro():
                     "Authorization": f"Bearer {token_mp}", 
                     "X-Idempotency-Key": str(uuid.uuid4())
                 }
+                
                 payload = {
                     "transaction_amount": 10.00,
                     "description": f"Mensalidade - {user['nome']}",
                     "payment_method_id": "pix",
-                    "payer": {"email": user['email']}
+                    "payer": {
+                        "email": user['email'],
+                        "first_name": user['nome'].split()[0]
+                    }
                 }
                 
                 try:
@@ -421,8 +461,13 @@ def renderizar_edicao_perfil(supabase_client, user):
         </div>
     """, unsafe_allow_html=True)
 
-    with st.expander("⚙️ Editar Meus Dados / Senha", expanded=False):
+    with st.expander("⚙️ Meus Dados e Calibragem Cardíaca", expanded=False):
+        
+        # ==========================================
+        # FORMULÁRIO 1: DADOS PESSOAIS
+        # ==========================================
         with st.form(key="form_edit_proprio_perfil"):
+            st.subheader("Dados Pessoais")
             c1, c2 = st.columns(2)
             
             novo_nome = c1.text_input("Nome", value=user.get('nome', ''))
@@ -440,7 +485,7 @@ def renderizar_edicao_perfil(supabase_client, user):
             nova_data = c1.date_input("Nascimento", value=val_data, format="DD/MM/YYYY")
             nova_senha = c2.text_input("Nova Senha (opcional)", type="password", help="Deixe vazio para manter a atual")
             
-            if st.form_submit_button("💾 Atualizar Meus Dados", width="stretch"):
+            if st.form_submit_button("💾 Atualizar Dados Pessoais", width="stretch"):
                 dados_update = {
                     "nome": novo_nome,
                     "telefone": novo_tel,
@@ -452,10 +497,34 @@ def renderizar_edicao_perfil(supabase_client, user):
                 
                 try:
                     supabase_client.table("usuarios_app").update(dados_update).eq("id", user['id']).execute()
-                    
                     st.session_state.user_info.update(dados_update)
-                    st.toast("Perfil atualizado com sucesso!", icon="✅")
+                    st.toast("Dados pessoais atualizados!", icon="✅")
                     time.sleep(1)
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Erro ao atualizar: {e}")
+                    st.error(f"Erro ao atualizar dados: {e}")
+
+        # ==========================================
+        # FORMULÁRIO 2: CALIBRAGEM CARDÍACA
+        # ==========================================
+        with st.form(key="form_calibragem_cardiaca"):
+            st.subheader("💓 Calibragem Cardíaca")
+            st.caption("Ajuste sua FC para que o cálculo de carga (TRIMP) seja exato.")
+            
+            col_fc1, col_fc2 = st.columns(2)
+            fc_max = col_fc1.number_input("Sua FC Máxima (bpm)", value=int(user.get('fc_maxima', 185)), min_value=100, max_value=230)
+            fc_rep = col_fc2.number_input("Sua FC Repouso (bpm)", value=int(user.get('fc_repouso', 60)), min_value=30, max_value=120)
+            
+            if st.form_submit_button("❤️ Atualizar Calibragem", width="stretch"):
+                dados_update_fc = {
+                    "fc_maxima": fc_max, 
+                    "fc_repouso": fc_rep 
+                }
+                try:
+                    supabase_client.table("usuarios_app").update(dados_update_fc).eq("id", user['id']).execute()
+                    st.session_state.user_info.update(dados_update_fc)
+                    st.toast("Calibragem cardíaca atualizada!", icon="✅")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao atualizar calibragem: {e}")
