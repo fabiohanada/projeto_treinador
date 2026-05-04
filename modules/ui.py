@@ -43,7 +43,7 @@ def exibir_logo_rodape():
         <div style="text-align: center;">
             <p style="color: #808495; font-size: 12px; margin-top: 10px; line-height: 1.4;">
                 Este aplicativo utiliza a API do Strava, mas não é afiliado ao Strava, Inc.<br>
-                © 2026 Peak Load - Desenvolvido por Fábio Assessoria | ADS Anhanguera <br>
+                © 2026 - Desenvolvido por Hanada System <br>
                 Termos de Uso <br>
                 Política de Privacidade                
             </p>

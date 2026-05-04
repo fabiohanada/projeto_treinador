@@ -22,7 +22,7 @@ except ImportError:
 # ============================================================================
 # 1. CONFIGURAÇÕES E CONEXÃO
 # ============================================================================
-st.set_page_config(page_title="Zaptreino - Professor Hanada", layout="wide", page_icon="🏃‍♂️")
+st.set_page_config(page_title="Zaptreino", layout="wide", page_icon="🏃‍♂️")
 
 supabase_client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
@@ -163,6 +163,7 @@ else:
     # Regras de bloqueio
     plano_expirado = hoje_data > vencimento
     bloqueado_manual = user.get('bloqueado', False)
+    aluno_bloqueado = bloqueado_manual or plano_expirado
     
     with st.sidebar:
         st.markdown(f"### DataPace\n👤 **{user['nome']}**")
@@ -172,34 +173,33 @@ else:
         # ============================================================
         if not user.get('is_admin'):
             
-            # Só permite editar perfil e conectar Strava se NÃO estiver bloqueado/vencido
-            if not (bloqueado_manual or plano_expirado):
+            # Só permite editar perfil, conectar Strava e ver Notificações se NÃO estiver bloqueado/vencido
+            if not aluno_bloqueado:
                 renderizar_edicao_perfil(supabase, user)
                 st.markdown("---")
                 url_strava = f"https://www.strava.com/oauth/authorize?client_id={st.secrets['STRAVA_CLIENT_ID']}&response_type=code&redirect_uri={st.secrets['STRAVA_REDIRECT_URI']}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
                 st.markdown(f'<a href="{url_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Sincronizar Strava</button></a>', unsafe_allow_html=True)
             
-            st.markdown("---")
-            st.markdown("### 📲 Notificações")
-            
-            # Substitua pelos seus dados do Twilio Console
-            numero_sandbox = "14155238886"  # Ex: +14155238886
-            codigo_join = "join rule-buy"  # Ex: join apple-orange
-            
-            url_zap = f"https://wa.me/{numero_sandbox}?text={codigo_join}"
-            
-            st.info("Para receber análises no Zap, ative o robô clicando abaixo:")
-            st.markdown(f'''
-                <a href="{url_zap}" target="_blank">
-                    <button style="background-color:#25D366;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">
-                        ✅ ATIVAR WHATSAPP
-                    </button>
-                </a>
-            ''', unsafe_allow_html=True)
+                # O bloco de notificações agora só aparece para alunos liberados
+                st.markdown("---")
+                st.markdown("### 📲 Notificações")
+                
+                numero_sandbox = "14155238886"
+                codigo_join = "join rule-buy"
+                url_zap = f"https://wa.me/{numero_sandbox}?text={codigo_join}"
+                
+                st.info("Para receber análises no Zap, ative o robô clicando abaixo:")
+                st.markdown(f'''
+                    <a href="{url_zap}" target="_blank">
+                        <button style="background-color:#25D366;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">
+                            ✅ ATIVAR WHATSAPP
+                        </button>
+                    </a>
+                ''', unsafe_allow_html=True)
         # ============================================================
         
         # --- BOTÃO SAIR (FICA VISÍVEL PARA TODO MUNDO) ---
-        st.sidebar.markdown("---") # Uma linha divisória para separar bem
+        st.sidebar.markdown("---") 
         if st.sidebar.button("Sair da Conta", width='stretch', key="btn_sair_fixo"):
             st.session_state.clear() 
             st.query_params.clear() 
@@ -209,10 +209,9 @@ else:
     if user.get('is_admin'):
         renderizar_tela_admin(supabase)
     
-    elif bloqueado_manual or plano_expirado:
-        # Se estiver vencido, mostra a tela de bloqueio e PARA a execução
+    elif aluno_bloqueado:
         renderizar_tela_bloqueio_financeiro()
-        st.stop() # Importante: evita que o resto do código do aluno rode abaixo
+        st.stop() 
         
     else:
         # TELA DO ALUNO (ACESSO LIBERADO)
@@ -223,7 +222,6 @@ else:
 
         st.title(f"E aí, {user['nome'].split()[0]}! ⚡")
         
-        # BUSCA ATUALIZADA
         res_t = supabase.table("atividades_fisicas").select(
             "data_treino, name, distancia, duracao, trimp_score, trimp_semanal, trimp_mensal"
         ).eq("id_atleta", user['id']).order("data_treino", desc=True).execute()
