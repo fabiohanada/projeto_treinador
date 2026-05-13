@@ -4,14 +4,16 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 from supabase import create_client
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import math 
 import threading
 import time
+import base64
+import uuid
 
 # Importação dos módulos customizados
 from modules.ui import aplicar_estilo_css, exibir_logo_rodape, estilizar_botoes
-from modules.views import renderizar_tela_login, renderizar_tela_admin, renderizar_tela_bloqueio_financeiro, enviar_notificacao_treino, renderizar_edicao_perfil
+from modules.views import renderizar_tela_admin, renderizar_tela_bloqueio_financeiro, enviar_notificacao_treino, renderizar_edicao_perfil
 
 # Importação da sua função de processamento de fila
 try:
@@ -144,11 +146,176 @@ def gerar_grafico_analise(df, titulo, dias=7):
     return fig
 
 # ============================================================================
-# 5. ROTEAMENTO DE TELAS (AJUSTADO)
+# 5. ROTEAMENTO DE TELAS E NOVO DESIGN DE LOGIN
 # ============================================================================
 if not st.session_state.logado:
-    renderizar_tela_login(supabase)
+    
+    # --- BUSCA A IMAGEM NA PASTA ASSETS AGORA ---
+    def get_base64_of_bin_file(bin_file):
+        try:
+            with open(bin_file, 'rb') as f:
+                return base64.b64encode(f.read()).decode()
+        except Exception as e: 
+            return ""
+
+    img_base64 = get_base64_of_bin_file("assets/fundo_runner.png")
+
+    st.markdown(f"""
+        <style>
+        /* 1. Imagem de Fundo Full Screen */
+        .stApp {{
+            background-image: url("data:image/png;base64,{img_base64}");
+            background-size: cover;
+            background-attachment: fixed;
+        }}
+        
+        /* 2. Esconde menus apenas na tela de login */
+        [data-testid="stHeader"] {{display: none;}}
+        [data-testid="stSidebar"] {{display: none;}}
+        .block-container {{padding: 0 !important; max-width: 100% !important; overflow-x: hidden;}}
+
+        /* 3. APLICA O VIDRO FOSCO DIRETAMENTE NA COLUNA DO MEIO */
+        div[data-testid="stHorizontalBlock"] > div:nth-child(2) {{
+            background: rgba(255, 255, 255, 0.65) !important; 
+            border-radius: 20px !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2) !important;
+            backdrop-filter: blur(12px) !important;
+            -webkit-backdrop-filter: blur(12px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.5) !important;
+            padding: 30px !important;
+            margin-top: 8vh;
+        }}
+
+        /* Truque para remover o fundo branco da sua logo_zaptreino.png */
+        [data-testid="stImage"] img {{
+            mix-blend-mode: multiply;
+        }}
+        
+
+        /* Deixa o Form invisivel para se misturar na coluna */
+        div[data-testid="stForm"] {{
+            background-color: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+        }}
+
+        /* 4. Estilo Botão Laranja */
+        div[data-testid="stFormSubmitButton"] button {{
+            background-color: #FF5722 !important;
+            color: white !important;
+            border-radius: 8px !important;
+            font-weight: 900 !important;
+            height: 45px !important;
+            border: none !important;
+            text-transform: uppercase;
+            transition: 0.3s ease !important;
+            margin-top: 15px;
+        }}
+        div[data-testid="stFormSubmitButton"] button:hover {{
+            background-color: #E64A19 !important;
+            transform: translateY(-2px);
+        }}
+        
+        /* 5. Ajuste das Abas */
+        .stTabs [data-baseweb="tab-list"] {{ justify-content: center; background-color: transparent; }}
+        .stTabs [aria-selected="true"] {{ color: #FF5722 !important; border-bottom-color: #FF5722 !important; font-weight: bold; }}
+        </style>
+    """, unsafe_allow_html=True)
+
+    # Criação das colunas: A do meio (índice 2) recebe o efeito de vidro
+    col_vazia_esq, col_painel_dir, col_margem = st.columns([1.8, 1.2, 0.2])
+
+    with col_painel_dir:
+        # Tenta carregar a logo, com o truque css ela ficará transparente
+        try: st.image("assets/logo_zaptreino.png")
+        except: pass
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        aba_login, aba_cadastro = st.tabs(["Fazer Login", "Criar Conta"])
+
+        with aba_login:
+            with st.form("form_login_vidro"):
+                email = st.text_input("E-mail")
+                senha = st.text_input("Senha", type="password")
+                
+                if st.form_submit_button("ENTRAR", width="stretch"):
+                    if not email or not senha:
+                        st.warning("Preencha todos os campos.")
+                    else:
+                        with st.spinner("Autenticando..."):
+                            email = email.strip().lower()
+                            try:
+                                res = supabase_client.table("usuarios_app").select("*").eq("email", email).eq("senha", senha).execute()
+                                if res.data:
+                                    user = res.data[0]
+                                    st.session_state.user_info = user
+                                    st.session_state.logado = True
+                                    uid = str(user.get('id') or user.get('uuid'))
+                                    st.query_params["session_id"] = uid
+                                    st.success(f"Bem-vindo, {user['nome']}!")
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                else:
+                                    st.error("E-mail ou senha incorretos.")
+                            except Exception as e:
+                                st.error(f"Erro técnico: {e}")
+
+        with aba_cadastro:
+            # O SEU CÓDIGO ORIGINAL INTACTO DE CRIAR CONTA
+            with st.form("form_cadastro"):
+                novo_nome = st.text_input("Nome Completo")
+                novo_email = st.text_input("E-mail")
+                novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="+5511999999999")
+                
+                data_nasc = st.date_input(
+                    "Data de Nascimento",
+                    value=None,
+                    min_value=date(1920, 1, 1), 
+                    max_value=date.today(),      
+                    format="DD/MM/YYYY"
+                )
+                nova_senha = st.text_input("Defina uma Senha", type="password")
+                confirma_senha = st.text_input("Confirme a Senha", type="password")
+                
+                st.divider()
+                st.markdown("<h4 style='text-align: center;'>Termos e Privacidade</h4>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: center; color: gray; font-size: 14px;'>Ao clicar em aceitar, você concorda com os nossos Termos de Uso e Política de Privacidade (LGPD).</p>", unsafe_allow_html=True)
+                aceite_termos = st.checkbox("Eu li e aceito os termos e condições.")
+                
+                botao_cadastrar = st.form_submit_button("Cadastrar", width="stretch")
+                
+                if botao_cadastrar:
+                    if not (novo_nome and novo_email and novo_telefone and nova_senha and data_nasc):
+                        st.warning("⚠️ Preencha todos os campos obrigatórios.")
+                    elif nova_senha != confirma_senha:
+                        st.error("❌ As senhas não coincidem.")
+                    elif not aceite_termos:
+                        st.error("🔒 É necessário aceitar os termos da LGPD.")
+                    else:
+                        dados = {
+                            "nome": novo_nome, 
+                            "email": novo_email.strip().lower(), 
+                            "telefone": novo_telefone, 
+                            "senha": nova_senha, 
+                            "data_nascimento": str(data_nasc), 
+                            "is_admin": False, 
+                            "status_pagamento": True,
+                            "aceite_lgpd": True
+                        }
+                        try:
+                            dados["id"] = str(uuid.uuid4())
+                            supabase_client.table("usuarios_app").insert(dados).execute()
+                            st.balloons()
+                            st.success("Conta criada! Faça login na aba ao lado.")
+                        except:
+                            st.error("Erro ao cadastrar. E-mail já existe?")
+
 else:
+    # ============================================================================
+    # TUDO DAQUI PARA BAIXO ESTÁ INTACTO (LÓGICA ORIGINAL DO SISTEMA LOGADO)
+    # ============================================================================
     user = st.session_state.user_info
     
     # --- LÓGICA DE BLOQUEIO POR DATA E MANUAL ---
@@ -175,7 +342,7 @@ else:
             
             # Só permite editar perfil, conectar Strava e ver Notificações se NÃO estiver bloqueado/vencido
             if not aluno_bloqueado:
-                renderizar_edicao_perfil(supabase, user)
+                renderizar_edicao_perfil(supabase_client, user)
                 st.markdown("---")
                 url_strava = f"https://www.strava.com/oauth/authorize?client_id={st.secrets['STRAVA_CLIENT_ID']}&response_type=code&redirect_uri={st.secrets['STRAVA_REDIRECT_URI']}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
                 st.markdown(f'<a href="{url_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Sincronizar Strava</button></a>', unsafe_allow_html=True)
@@ -207,7 +374,7 @@ else:
             
     # --- ROTEAMENTO FINAL ---
     if user.get('is_admin'):
-        renderizar_tela_admin(supabase)
+        renderizar_tela_admin(supabase_client)
     
     elif aluno_bloqueado:
         renderizar_tela_bloqueio_financeiro()
@@ -222,7 +389,7 @@ else:
 
         st.title(f"E aí, {user['nome'].split()[0]}! ⚡")
         
-        res_t = supabase.table("atividades_fisicas").select(
+        res_t = supabase_client.table("atividades_fisicas").select(
             "data_treino, name, distancia, duracao, trimp_score, trimp_semanal, trimp_mensal"
         ).eq("id_atleta", user['id']).order("data_treino", desc=True).execute()
         
@@ -267,7 +434,7 @@ else:
             st.markdown("---")
             with st.expander("❓ Entenda as Cores da Carga (Semáforo)"):
                 c1, c2, c3 = st.columns(3)
-                c1.info("**Individual**\n\n🟢 < 70\n\n🟡 71-150\n\n🔴 > 150")
+                c1.info("**Diario**\n\n🟢 < 70\n\n🟡 71-150\n\n🔴 > 150")
                 c2.warning("**Semanal**\n\n🟢 < 400\n\n🟡 401-800\n\n🔴 > 800")
                 c3.error("**Mensal**\n\n🟢 < 1500\n\n🟡 1501-3000\n\n🔴 > 3000")
 

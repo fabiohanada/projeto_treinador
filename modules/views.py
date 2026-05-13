@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from twilio.rest import Client
 import re
 from supabase import create_client
+import base64
 
 # ============================================================================
 # 1. FUNÇÕES DE NOTIFICAÇÃO (WHATSAPP)
