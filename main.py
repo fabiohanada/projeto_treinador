@@ -17,7 +17,8 @@ from modules.views import renderizar_tela_admin, renderizar_tela_bloqueio_financ
 
 # Importação da sua função de processamento de fila
 try:
-    from processar_fila import processar_novos_treinos as processar_fila_treinos
+    from processar_fila import processar_novos_treinos
+    from auth_strava import obter_token_valido
 except ImportError:
     st.error("Arquivo processar_fila.py não encontrado ou função ausente!")
 
@@ -98,10 +99,14 @@ target_id = params.get("state") or params.get("session_id")
 auth_code = params.get("code") 
 
 if not st.session_state.logado and target_id:
-    res = supabase.table("usuarios_app").select("*").eq("id", target_id).execute()
+    res = supabase_client.table("usuarios_app").select("*").eq("id", target_id).execute()
     if res.data:
         st.session_state.user_info = res.data[0]
         st.session_state.logado = True
+        # Limpa os parâmetros mas mantém o session_id na URL para o app não deslogar ao dar refresh
+        st.query_params.clear()
+        st.query_params["session_id"] = target_id
+        st.rerun()
         
         if auth_code:
             try:
@@ -344,8 +349,14 @@ else:
             if not aluno_bloqueado:
                 renderizar_edicao_perfil(supabase_client, user)
                 st.markdown("---")
-                url_strava = f"https://www.strava.com/oauth/authorize?client_id={st.secrets['STRAVA_CLIENT_ID']}&response_type=code&redirect_uri={st.secrets['STRAVA_REDIRECT_URI']}&approval_prompt=force&scope=read,activity:read_all&state={user['id']}"
-                st.markdown(f'<a href="{url_strava}" target="_self"><button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">Sincronizar Strava</button></a>', unsafe_allow_html=True)
+                url_strava = f"https://www.strava.com/oauth/authorize?client_id={st.secrets['STRAVA_CLIENT_ID']}&response_type=code&redirect_uri={st.secrets['STRAVA_REDIRECT_URI']}&approval_prompt=auto&scope=read,activity:read_all&state={user['id']}"
+                st.markdown(f'''
+                    <a href="{url_strava}" target="_top">
+                        <button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">
+                            Sincronizar Strava
+                        </button>
+                    </a>
+                ''', unsafe_allow_html=True)
             
                 # O bloco de notificações agora só aparece para alunos liberados
                 st.markdown("---")
