@@ -269,7 +269,7 @@ if not st.session_state.logado:
 
         with aba_cadastro:
             # O SEU CÓDIGO ORIGINAL INTACTO DE CRIAR CONTA
-            with st.form("form_cadastro"):
+            with st.form("form_cadastro", clear_on_submit=True):
                 novo_nome = st.text_input("Nome Completo")
                 novo_email = st.text_input("E-mail")
                 novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="+5511999999999")
