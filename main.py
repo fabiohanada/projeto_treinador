@@ -337,7 +337,8 @@ else:
     bloqueado_manual = user.get('bloqueado', False)
     aluno_bloqueado = bloqueado_manual or plano_expirado
     
-    with st.sidebar ("--- TESTE: O CÓDIGO CHEGOU AQUI ---"):
+    with st.sidebar:
+        st.write("--- TESTE: O CÓDIGO CHEGOU AQUI ---"):
         st.markdown(f"### DataPace\n👤 **{user['nome']}**")
         
         # ============================================================
