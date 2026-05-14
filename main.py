@@ -307,6 +307,7 @@ if not st.session_state.logado:
                             "data_nascimento": str(data_nasc), 
                             "is_admin": False, 
                             "status_pagamento": True,
+                            "bloqueado": True,
                             "aceite_lgpd": True
                         }
                         try:
