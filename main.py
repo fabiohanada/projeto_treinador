@@ -77,7 +77,7 @@ estilizar_botoes()
 def servico_vigilante_5min():
     while True:
         try:
-            processar_fila_treinos() 
+            processar_novos_treinos()
             print(f"✅ Vigilante: Ciclo silencioso concluído {datetime.now().strftime('%H:%M:%S')}")
         except Exception as e:
             print(f"❌ Erro no Vigilante: {e}")
@@ -395,7 +395,7 @@ else:
         # TELA DO ALUNO (ACESSO LIBERADO)
         if 'sync_inicial' not in st.session_state:
             with st.spinner("Sincronizando seus treinos agora..."):
-                processar_fila_treinos(user['id'], origem_botao=True)
+                processar_novos_treinos(user['id'], origem_botao=True)
                 st.session_state['sync_inicial'] = True
 
         st.title(f"E aí, {user['nome'].split()[0]}! ⚡")
