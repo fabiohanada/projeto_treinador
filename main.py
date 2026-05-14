@@ -338,7 +338,7 @@ else:
     aluno_bloqueado = bloqueado_manual or plano_expirado
     
     with st.sidebar:
-        st.write("--- TESTE: O CÓDIGO CHEGOU AQUI ---"):
+        st.write("--- TESTE: O CÓDIGO CHEGOU AQUI ---")
         st.markdown(f"### DataPace\n👤 **{user['nome']}**")
         
         # ============================================================
