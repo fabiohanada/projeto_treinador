@@ -351,10 +351,19 @@ else:
                 st.markdown("---")
                 url_strava = f"https://www.strava.com/oauth/authorize?client_id={st.secrets['STRAVA_CLIENT_ID']}&response_type=code&redirect_uri={st.secrets['STRAVA_REDIRECT_URI']}&approval_prompt=auto&scope=read,activity:read_all&state={user['id']}"
                 st.markdown(f'''
-                    <a href="{url_strava}" target="_top">
-                        <button style="background-color:#FC4C02;color:white;border:none;padding:10px;width:100%;border-radius:4px;font-weight:bold;cursor:pointer;">
-                            Sincronizar Strava
-                        </button>
+                    <a href="{url_strava}" target="_blank" style="
+                        display: block;
+                        background-color: #FC4C02;
+                        color: white;
+                        text-align: center;
+                        text-decoration: none;
+                        padding: 10px;
+                        width: 100%;
+                        border-radius: 4px;
+                        font-weight: bold;
+                        box-sizing: border-box;
+                    ">
+                        Sincronizar Strava
                     </a>
                 ''', unsafe_allow_html=True)
             
