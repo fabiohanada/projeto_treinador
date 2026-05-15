@@ -315,10 +315,13 @@ if not st.session_state.logado:
                     elif not aceite_termos:
                         st.error("🔒 É necessário aceitar os termos da LGPD.")
                     else:
+                        telefone_formatado = novo_telefone.strip()
+                        if not telefone_formatado.startswith('+'):
+                            telefone_formatado = '+' + telefone_formatado
                         dados = {
                             "nome": novo_nome, 
                             "email": novo_email.strip().lower(), 
-                            "telefone": novo_telefone, 
+                            "telefone": telefone_formatado, 
                             "senha": nova_senha, 
                             "data_nascimento": str(data_nasc), 
                             "is_admin": False, 
