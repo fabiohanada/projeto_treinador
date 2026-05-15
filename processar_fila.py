@@ -185,4 +185,4 @@ if __name__ == "__main__":
     # Loop para rodar como serviço independente se necessário
     while True:
         processar_novos_treinos()
-        time.sleep(300)
+        time.sleep(1800)
