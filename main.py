@@ -126,7 +126,7 @@ if not st.session_state.logado and target_id:
                         "refresh_token": response.get('refresh_token'),
                         "expires_at": response.get('expires_at')
                     }).execute()
-                    processar_fila_treinos(target_id)
+                    processar_novos_treinos(target_id) # CORRIGIDO AQUI
             except Exception as e:
                 print(f"Erro no OAuth Strava: {e}")
 
@@ -267,78 +267,78 @@ if not st.session_state.logado:
                             except Exception as e:
                                 st.error(f"Erro técnico: {e}")
 
-    with aba_cadastro:
-    # Verificação para mostrar mensagem de sucesso após o reset da página
-    if st.session_state.get("cadastro_sucesso"):
-        st.success("Conta criada! Faça login na aba ao lado.")
-        st.balloons()
-        st.session_state.cadastro_sucesso = False
+        with aba_cadastro:
+            # Verificação para mostrar mensagem de sucesso após o reset da página
+            if st.session_state.get("cadastro_sucesso"):
+                st.success("Conta criada! Faça login na aba ao lado.")
+                st.balloons()
+                st.session_state.cadastro_sucesso = False
 
-    with st.form("form_cadastro"):
-        # Adicionamos 'key' em cada campo para controlar o estado
-        novo_nome = st.text_input("Nome Completo", key="c_nome")
-        novo_email = st.text_input("E-mail", key="c_email")
-        novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="+5511999999999", key="c_tel")
-        
-        data_nasc = st.date_input(
-            "Data de Nascimento",
-            value=None,
-            min_value=date(1920, 1, 1), 
-            max_value=date.today(),      
-            format="DD/MM/YYYY",
-            key="c_data"
-        )
-        nova_senha = st.text_input("Defina uma Senha", type="password", key="c_senha")
-        confirma_senha = st.text_input("Confirme a Senha", type="password", key="c_conf_senha")
-        
-        st.divider()
-        st.markdown("<h4 style='text-align: center;'>Termos e Privacidade</h4>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: gray; font-size: 14px;'>Ao clicar em aceitar, você concorda com os nossos Termos de Uso e Política de Privacidade (LGPD).</p>", unsafe_allow_html=True)
-        aceite_termos = st.checkbox("Eu li e aceito os termos e condições.", key="c_termos")
-        
-        botao_cadastrar = st.form_submit_button("Cadastrar", width="stretch")
-        
-        if botao_cadastrar:
-            # 1. Verificação manual se o e-mail já existe (Evita limpar o form no erro)
-            email_check = supabase_client.table("usuarios_app").select("email").eq("email", novo_email.strip().lower()).execute()
-            
-            if not (novo_nome and novo_email and novo_telefone and nova_senha and data_nasc):
-                st.warning("⚠️ Preencha todos os campos obrigatórios.")
-            elif email_check.data:
-                # Se o e-mail existe, mostramos o erro. Os dados permanecem nos campos devido às 'keys'.
-                st.error("❌ Este e-mail já está cadastrado. Tente outro.")
-            elif nova_senha != confirma_senha:
-                st.error("❌ As senhas não coincidem.")
-            elif not aceite_termos:
-                st.error("🔒 É necessário aceitar os termos da LGPD.")
-            else:
-                dados = {
-                    "nome": novo_nome, 
-                    "email": novo_email.strip().lower(), 
-                    "telefone": novo_telefone, 
-                    "senha": nova_senha, 
-                    "data_nascimento": str(data_nasc), 
-                    "is_admin": False, 
-                    "status_pagamento": True,
-                    "bloqueado": True, # Aluno entra bloqueado como você pediu
-                    "aceite_lgpd": True
-                }
-                try:
-                    dados["id"] = str(uuid.uuid4())
-                    supabase_client.table("usuarios_app").insert(dados).execute()
+            with st.form("form_cadastro"):
+                # Adicionamos 'key' em cada campo para controlar o estado
+                novo_nome = st.text_input("Nome Completo", key="c_nome")
+                novo_email = st.text_input("E-mail", key="c_email")
+                novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="+5511999999999", key="c_tel")
+                
+                data_nasc = st.date_input(
+                    "Data de Nascimento",
+                    value=None,
+                    min_value=date(1920, 1, 1), 
+                    max_value=date.today(),      
+                    format="DD/MM/YYYY",
+                    key="c_data"
+                )
+                nova_senha = st.text_input("Defina uma Senha", type="password", key="c_senha")
+                confirma_senha = st.text_input("Confirme a Senha", type="password", key="c_conf_senha")
+                
+                st.divider()
+                st.markdown("<h4 style='text-align: center;'>Termos e Privacidade</h4>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: center; color: gray; font-size: 14px;'>Ao clicar em aceitar, você concorda com os nossos Termos de Uso e Política de Privacidade (LGPD).</p>", unsafe_allow_html=True)
+                aceite_termos = st.checkbox("Eu li e aceito os termos e condições.", key="c_termos")
+                
+                botao_cadastrar = st.form_submit_button("Cadastrar", width="stretch")
+                
+                if botao_cadastrar:
+                    # 1. Verificação manual se o e-mail já existe (Evita limpar o form no erro)
+                    email_check = supabase_client.table("usuarios_app").select("email").eq("email", novo_email.strip().lower()).execute()
                     
-                    # ✅ SUCESSO: Limpamos os campos manualmente no session_state
-                    for k in ["c_nome", "c_email", "c_tel", "c_senha", "c_conf_senha"]:
-                        st.session_state[k] = ""
-                    st.session_state["c_termos"] = False
-                    st.session_state["c_data"] = None
-                    
-                    # Ativamos um sinalizador para mostrar a mensagem após o rerun
-                    st.session_state.cadastro_sucesso = True
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"Erro técnico ao cadastrar: {e}")
+                    if not (novo_nome and novo_email and novo_telefone and nova_senha and data_nasc):
+                        st.warning("⚠️ Preencha todos os campos obrigatórios.")
+                    elif email_check.data:
+                        # Se o e-mail existe, mostramos o erro. Os dados permanecem nos campos devido às 'keys'.
+                        st.error("❌ Este e-mail já está cadastrado. Tente outro.")
+                    elif nova_senha != confirma_senha:
+                        st.error("❌ As senhas não coincidem.")
+                    elif not aceite_termos:
+                        st.error("🔒 É necessário aceitar os termos da LGPD.")
+                    else:
+                        dados = {
+                            "nome": novo_nome, 
+                            "email": novo_email.strip().lower(), 
+                            "telefone": novo_telefone, 
+                            "senha": nova_senha, 
+                            "data_nascimento": str(data_nasc), 
+                            "is_admin": False, 
+                            "status_pagamento": True,
+                            "bloqueado": True, # Aluno entra bloqueado como você pediu
+                            "aceite_lgpd": True
+                        }
+                        try:
+                            dados["id"] = str(uuid.uuid4())
+                            supabase_client.table("usuarios_app").insert(dados).execute()
+                            
+                            # ✅ SUCESSO: Limpamos os campos manualmente no session_state
+                            for k in ["c_nome", "c_email", "c_tel", "c_senha", "c_conf_senha"]:
+                                st.session_state[k] = ""
+                            st.session_state["c_termos"] = False
+                            st.session_state["c_data"] = None
+                            
+                            # Ativamos um sinalizador para mostrar a mensagem após o rerun
+                            st.session_state.cadastro_sucesso = True
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"Erro técnico ao cadastrar: {e}")
 
 else:
     # ============================================================================
