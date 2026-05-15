@@ -340,7 +340,6 @@ with aba_cadastro:
                 except Exception as e:
                     st.error(f"Erro técnico ao cadastrar: {e}")
 
-else:
     # ============================================================================
     # TUDO DAQUI PARA BAIXO ESTÁ INTACTO (LÓGICA ORIGINAL DO SISTEMA LOGADO)
     # ============================================================================
