@@ -274,11 +274,15 @@ if not st.session_state.logado:
                 st.balloons()
                 st.session_state.cadastro_sucesso = False
 
+            # CRIAMOS UMA CHAVE DINÂMICA PARA O FORMULÁRIO
+            if "form_key" not in st.session_state:
+                st.session_state.form_key = 0
+            fk = st.session_state.form_key
+
             with st.form("form_cadastro"):
-                # Adicionamos 'key' em cada campo para controlar o estado
-                novo_nome = st.text_input("Nome Completo", key="c_nome")
-                novo_email = st.text_input("E-mail", key="c_email")
-                novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="+5511999999999", key="c_tel")
+                novo_nome = st.text_input("Nome Completo", key=f"c_nome_{fk}")
+                novo_email = st.text_input("E-mail", key=f"c_email_{fk}")
+                novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="+5511999999999", key=f"c_tel_{fk}")
                 
                 data_nasc = st.date_input(
                     "Data de Nascimento",
@@ -286,26 +290,25 @@ if not st.session_state.logado:
                     min_value=date(1920, 1, 1), 
                     max_value=date.today(),      
                     format="DD/MM/YYYY",
-                    key="c_data"
+                    key=f"c_data_{fk}"
                 )
-                nova_senha = st.text_input("Defina uma Senha", type="password", key="c_senha")
-                confirma_senha = st.text_input("Confirme a Senha", type="password", key="c_conf_senha")
+                nova_senha = st.text_input("Defina uma Senha", type="password", key=f"c_senha_{fk}")
+                confirma_senha = st.text_input("Confirme a Senha", type="password", key=f"c_conf_senha_{fk}")
                 
                 st.divider()
                 st.markdown("<h4 style='text-align: center;'>Termos e Privacidade</h4>", unsafe_allow_html=True)
                 st.markdown("<p style='text-align: center; color: gray; font-size: 14px;'>Ao clicar em aceitar, você concorda com os nossos Termos de Uso e Política de Privacidade (LGPD).</p>", unsafe_allow_html=True)
-                aceite_termos = st.checkbox("Eu li e aceito os termos e condições.", key="c_termos")
+                aceite_termos = st.checkbox("Eu li e aceito os termos e condições.", key=f"c_termos_{fk}")
                 
                 botao_cadastrar = st.form_submit_button("Cadastrar", width="stretch")
                 
                 if botao_cadastrar:
-                    # 1. Verificação manual se o e-mail já existe (Evita limpar o form no erro)
+                    # 1. Verificação manual se o e-mail já existe
                     email_check = supabase_client.table("usuarios_app").select("email").eq("email", novo_email.strip().lower()).execute()
                     
                     if not (novo_nome and novo_email and novo_telefone and nova_senha and data_nasc):
                         st.warning("⚠️ Preencha todos os campos obrigatórios.")
                     elif email_check.data:
-                        # Se o e-mail existe, mostramos o erro. Os dados permanecem nos campos devido às 'keys'.
                         st.error("❌ Este e-mail já está cadastrado. Tente outro.")
                     elif nova_senha != confirma_senha:
                         st.error("❌ As senhas não coincidem.")
@@ -320,20 +323,16 @@ if not st.session_state.logado:
                             "data_nascimento": str(data_nasc), 
                             "is_admin": False, 
                             "status_pagamento": True,
-                            "bloqueado": True, # Aluno entra bloqueado como você pediu
+                            "bloqueado": True, # Aluno entra bloqueado
                             "aceite_lgpd": True
                         }
                         try:
                             dados["id"] = str(uuid.uuid4())
                             supabase_client.table("usuarios_app").insert(dados).execute()
                             
-                            # ✅ SUCESSO: Limpamos os campos manualmente no session_state
-                            for k in ["c_nome", "c_email", "c_tel", "c_senha", "c_conf_senha"]:
-                                st.session_state[k] = ""
-                            st.session_state["c_termos"] = False
-                            st.session_state["c_data"] = None
-                            
-                            # Ativamos um sinalizador para mostrar a mensagem após o rerun
+                            # ✅ O TRUQUE MÁGICO: Aumentamos o número da chave!
+                            # O Streamlit vai recarregar a tela com campos zerados.
+                            st.session_state.form_key += 1
                             st.session_state.cadastro_sucesso = True
                             st.rerun()
                             
