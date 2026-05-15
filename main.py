@@ -282,7 +282,7 @@ if not st.session_state.logado:
             with st.form("form_cadastro"):
                 novo_nome = st.text_input("Nome Completo", key=f"c_nome_{fk}")
                 novo_email = st.text_input("E-mail", key=f"c_email_{fk}")
-                novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="+5511999999999", key=f"c_tel_{fk}")
+                novo_telefone = st.text_input("Telefone (WhatsApp)", placeholder="11999999999", key=f"c_tel_{fk}")
                 
                 data_nasc = st.date_input(
                     "Data de Nascimento",
