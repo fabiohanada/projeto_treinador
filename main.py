@@ -81,7 +81,7 @@ def servico_vigilante_5min():
             print(f"✅ Vigilante: Ciclo silencioso concluído {datetime.now().strftime('%H:%M:%S')}")
         except Exception as e:
             print(f"❌ Erro no Vigilante: {e}")
-        time.sleep(300) # 5 minutos
+        time.sleep(1800) # 30 minutos
 
 if not hasattr(st, "vigilante_ativo"):
     t = threading.Thread(target=servico_vigilante_5min, daemon=True)
