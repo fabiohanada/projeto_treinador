@@ -267,7 +267,7 @@ if not st.session_state.logado:
                             except Exception as e:
                                 st.error(f"Erro técnico: {e}")
 
-with aba_cadastro:
+    with aba_cadastro:
     # Verificação para mostrar mensagem de sucesso após o reset da página
     if st.session_state.get("cadastro_sucesso"):
         st.success("Conta criada! Faça login na aba ao lado.")
