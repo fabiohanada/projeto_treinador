@@ -303,11 +303,21 @@ if not st.session_state.logado:
                 botao_cadastrar = st.form_submit_button("Cadastrar", width="stretch")
                 
                 if botao_cadastrar:
-                    # 1. Verificação manual se o e-mail já existe
+                    # 1. LIMPEZA DO TELEFONE: Remove tudo que não for número
+                    import re
+                    apenas_numeros = re.sub(r'\D', '', novo_telefone)
+                    
+                    # 2. VERIFICAÇÃO MANUEL DE E-MAIL
                     email_check = supabase_client.table("usuarios_app").select("email").eq("email", novo_email.strip().lower()).execute()
                     
+                    # --- VALIDAÇÕES ---
                     if not (novo_nome and novo_email and novo_telefone and nova_senha and data_nasc):
                         st.warning("⚠️ Preencha todos os campos obrigatórios.")
+                    
+                    # TRAVA: Verifica se tem exatamente 11 números (DDD + 9 dígitos)
+                    elif len(apenas_numeros) != 11:
+                        st.error("❌ O telefone deve ter exatamente 11 números (Ex: 11988887777). Não precisa digitar +55.")
+                    
                     elif email_check.data:
                         st.error("❌ Este e-mail já está cadastrado. Tente outro.")
                     elif nova_senha != confirma_senha:
@@ -315,33 +325,30 @@ if not st.session_state.logado:
                     elif not aceite_termos:
                         st.error("🔒 É necessário aceitar os termos da LGPD.")
                     else:
-                        telefone_formatado = novo_telefone.strip()
-                        if not telefone_formatado.startswith('+'):
-                            telefone_formatado = '+' + telefone_formatado
+                        # 3. MONTAGEM FINAL: Forçamos o +55 na frente do que foi limpo
+                        telefone_final = f"+55{apenas_numeros}"
+                        
                         dados = {
                             "nome": novo_nome, 
                             "email": novo_email.strip().lower(), 
-                            "telefone": telefone_formatado, 
+                            "telefone": telefone_final, 
                             "senha": nova_senha, 
                             "data_nascimento": str(data_nasc), 
                             "is_admin": False, 
                             "status_pagamento": True,
-                            "bloqueado": True, # Aluno entra bloqueado
+                            "bloqueado": True,
                             "aceite_lgpd": True
                         }
                         try:
                             dados["id"] = str(uuid.uuid4())
                             supabase_client.table("usuarios_app").insert(dados).execute()
                             
-                            # ✅ O TRUQUE MÁGICO: Aumentamos o número da chave!
-                            # O Streamlit vai recarregar a tela com campos zerados.
                             st.session_state.form_key += 1
                             st.session_state.cadastro_sucesso = True
                             st.rerun()
                             
                         except Exception as e:
                             st.error(f"Erro técnico ao cadastrar: {e}")
-
 else:
     # ============================================================================
     # TUDO DAQUI PARA BAIXO ESTÁ INTACTO (LÓGICA ORIGINAL DO SISTEMA LOGADO)
