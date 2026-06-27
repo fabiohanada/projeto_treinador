@@ -125,7 +125,8 @@ if not st.session_state.logado and target_id:
         
         if auth_code:
             try:
-                response = requests.post("https://www.strava.com/api/v3/oauth/token",
+                # URL CORRIGIDA E UNIFICADA DO STRAVA AQUI:
+                response = requests.post("https://www.strava.com/oauth/token",
                     data={
                         'client_id': st.secrets["STRAVA_CLIENT_ID"],
                         'client_secret': st.secrets["STRAVA_CLIENT_SECRET"],
@@ -141,7 +142,7 @@ if not st.session_state.logado and target_id:
                         "refresh_token": response.get('refresh_token'),
                         "expires_at": response.get('expires_at')
                     }).execute()
-                    processar_novos_treinos(target_id) # CORRIGIDO AQUI
+                    processar_novos_treinos(target_id)
             except Exception as e:
                 print(f"Erro no OAuth Strava: {e}")
 
