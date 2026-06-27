@@ -74,17 +74,32 @@ estilizar_botoes()
 # ============================================================================
 # 2. SERVIÇO VIGILANTE (BACKGROUND)
 # ============================================================================
-def servico_vigilante_5min():
+def servico_vigilante_30min():
     while True:
         try:
-            processar_novos_treinos()
-            print(f"✅ Vigilante: Ciclo silencioso concluído {datetime.now().strftime('%H:%M:%S')}")
+            print(f"🔄 Vigilante iniciando varredura de atletas às {datetime.now().strftime('%H:%M:%S')}...")
+            # 1. Busca todos os usuários cadastrados que não são administradores
+            resposta_usuarios = supabase_client.table("usuarios_app").select("id").eq("is_admin", False).execute()
+            
+            if resposta_usuarios.data:
+                for atleta in resposta_usuarios.data:
+                    atleta_id = atleta.get("id")
+                    if atleta_id:
+                        try:
+                            # 2. Processa os treinos individualmente passando o ID correto
+                            processar_novos_treinos(atleta_id)
+                            print(f"   ✅ Atleta {atleta_id} verificado com sucesso.")
+                        except Exception as erro_atleta:
+                            print(f"   ❌ Erro ao processar atleta {atleta_id}: {erro_atleta}")
+            
+            print(f"✅ Vigilante: Ciclo completo concluído com sucesso!")
         except Exception as e:
-            print(f"❌ Erro no Vigilante: {e}")
-        time.sleep(1800) # 30 minutos
+            print(f"❌ Erro Crítico Geral no Vigilante: {e}")
+        
+        time.sleep(1800) # Aguarda 30 minutos para o próximo ciclo
 
 if not hasattr(st, "vigilante_ativo"):
-    t = threading.Thread(target=servico_vigilante_5min, daemon=True)
+    t = threading.Thread(target=servico_vigilante_30min, daemon=True)
     t.start()
     st.vigilante_ativo = True
 
