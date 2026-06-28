@@ -96,9 +96,9 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                 print(f"⚠️ [{tipo}] Não foi possível validar token para {u_data['nome']}")
                 continue
 
-            # --- BUSCA NO STRAVA ---
+            # --- BUSCA NO STRAVA (Janela estendida para 7 dias para evitar perdas em testes) ---
             headers = {'Authorization': f'Bearer {token}'}
-            after_date = int((datetime.now() - timedelta(days=2)).timestamp())
+            after_date = int((datetime.now() - timedelta(days=7)).timestamp())
             atividades = requests.get(f"https://www.strava.com/api/v3/athlete/activities?after={after_date}", headers=headers).json()
 
             if isinstance(atividades, list):
