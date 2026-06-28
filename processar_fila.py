@@ -65,6 +65,7 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
             query = query.eq("user_id", user_id_especifico)
         
         usuarios = query.execute().data
+        print(f"🔍 [DIAGNÓSTICO] Usuários encontrados na auth_strava: {len(usuarios) if usuarios else 0}")
         if not usuarios: return
 
         for u in usuarios:
@@ -74,6 +75,7 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
             u_info_db = supabase.table("usuarios_app").select("nome, telefone, bloqueado, data_vencimento, fc_maxima").eq("id", user_id).execute()
             
             if not u_info_db.data:
+                print(f"⚠️ [DIAGNÓSTICO] Aluno {user_id} não encontrado na tabela usuarios_app.")
                 continue
                 
             u_data = u_info_db.data[0]
@@ -90,33 +92,50 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                 print(f"🚫 [{tipo}] {u_data['nome']} ignorado (Bloqueado/Vencido).")
                 continue 
 
-            # --- OBTENÇÃO DO TOKEN (Lógica centralizada) ---
+            # --- OBTENÇÃO DO TOKEN ---
             token = obter_token_valido(user_id)
+            print(f"🔑 [DIAGNÓSTICO] Token obtido para {u_data['nome']}: {'Sucesso (Começa com ' + token[:10] + '...)' if token else 'FALHOU!'}")
             if not token:
-                print(f"⚠️ [{tipo}] Não foi possível validar token para {u_data['nome']}")
                 continue
 
-            # --- BUSCA NO STRAVA (Janela estendida para 7 dias para evitar perdas em testes) ---
+            # --- BUSCA NO STRAVA ---
             headers = {'Authorization': f'Bearer {token}'}
             after_date = int((datetime.now() - timedelta(days=7)).timestamp())
-            atividades = requests.get(f"https://www.strava.com/api/v3/athlete/activities?after={after_date}", headers=headers).json()
+            
+            url_strava = f"https://www.strava.com/api/v3/athlete/activities?after={after_date}"
+            print(f"🌐 [DIAGNÓSTICO] Fazendo chamada para o Strava: {url_strava}")
+            
+            resposta_strava = requests.get(url_strava, headers=headers)
+            print(f"📊 [DIAGNÓSTICO] Status Code do Strava: {resposta_strava.status_code}")
+            
+            atividades = resposta_strava.json()
+            
+            # Se o Strava der erro de autenticação, ele devolve um dicionário com a mensagem de erro, não uma lista
+            if isinstance(atividades, dict) and "message" in atividades:
+                print(f"❌ [DIAGNÓSTICO] Erro retornado pela API do Strava: {atividades}")
+                continue
+
+            print(f"🏃‍♂️ [DIAGNÓSTICO] Quantidade de atividades devolvidas pelo Strava: {len(atividades) if isinstance(atividades, list) else 0}")
 
             if isinstance(atividades, list):
                 for act in atividades:
                     strava_id = str(act['id'])
                     nome_atividade = act.get('name', 'Treino')
+                    print(f"   🔹 Processando atividade encontrada: {nome_atividade} (ID: {strava_id})")
+                    
+                    dist = act.get('distance', 0) / 1000
+                    dur_min = int(act.get('moving_time', 0) / 60)
+                    
+                    # Se for muito curta, o código ignora. Vamos colocar um print para sabermos se foi ignorada aqui
+                    if dur_min < 5 and dist < 0.5: 
+                        print(f"   ⚠️ Atividade {nome_atividade} ignorada por ser muito curta ({dur_min} min, {dist} km)")
+                        continue 
+
                     fc_media = act.get('average_heartrate', 0) 
                     
                     existe = supabase.table("atividades_fisicas").select("id, notificacao").eq("strava_id", strava_id).execute()
                     
-                    # Processa se for novo ou se clicou no botão (para forçar atualização)
                     if not existe.data or origem_botao:
-                        dist = act.get('distance', 0) / 1000
-                        dur_min = int(act.get('moving_time', 0) / 60)
-                        
-                        if dur_min < 5 and dist < 0.5: continue 
-
-                        # CÁLCULO DE CARGA
                         if fc_media and fc_media > 0:
                             trimp_atual = calcular_trimp_banister(dur_min, fc_media, fc_aluno)
                             nota_manual = ""
@@ -126,7 +145,6 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
 
                         t_semanal, t_mensal = buscar_acumulados_trimp(user_id, trimp_atual)
 
-                        # SEMÁFORO DE CARGA
                         emoji_dia = "🟢" if trimp_atual <= 70 else "🟡" if trimp_atual <= 150 else "🔴"
                         emoji_sem = "🟢" if t_semanal <= 400 else "🟡" if t_semanal <= 800 else "🔴"
                         emoji_men = "🟢" if t_mensal <= 1500 else "🟡" if t_mensal <= 3000 else "🔴"
@@ -158,11 +176,11 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                             "notificacao": True
                         }
 
-                        # ENVIO DE NOTIFICAÇÃO (Apenas se for novo)
                         if not existe.data:
-                            supabase.table("atividades_fisicas").insert(dados_banco).execute()
+                            print(f"   💾 Tentando inserir nova atividade {nome_atividade} no Supabase...")
+                            ins_res = supabase.table("atividades_fisicas").insert(dados_banco).execute()
+                            print(f"   ✅ Resultado da inserção: {ins_res.data}")
                             
-                            # Prepara dados para o template da mensagem
                             dados_notificacao = dados_banco.copy()
                             dados_notificacao.update({
                                 "duracao_formatada": f"{dur_min//60:02d}:{dur_min%60:02d}",
@@ -172,10 +190,13 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                                 "aviso_seguranca": aviso_seg
                             })
                             
-                            from modules.views import enviar_notificacao_treino
-                            enviar_notificacao_treino(dados_notificacao, u_data['nome'], u_data.get('telefone'))
+                            try:
+                                from modules.views import enviar_notificacao_treino
+                                enviar_notificacao_treino(dados_notificacao, u_data['nome'], u_data.get('telefone'))
+                            except Exception as err_notif:
+                                print(f"   ❌ Erro ao enviar Zap: {err_notif}")
                         else:
-                            # Se já existe, apenas atualiza os números (útil se o aluno mudar o nome da atividade no Strava)
+                            print(f"   🔄 Atualizando atividade existente {nome_atividade}...")
                             supabase.table("atividades_fisicas").update(dados_banco).eq("strava_id", strava_id).execute()
 
     except Exception as e:
