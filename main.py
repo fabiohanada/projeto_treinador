@@ -79,18 +79,23 @@ def servico_vigilante_30min():
         try:
             print(f"🔄 Vigilante iniciando varredura de atletas às {datetime.now().strftime('%H:%M:%S')}...")
             
-            # IMPORTAÇÃO FORÇADA DENTRO DA THREAD PARA EVITAR 'NOT DEFINED'
+            # 1. Importações locais forçadas para garantir o escopo na Thread
             from processar_fila import processar_novos_treinos
+            from supabase import create_client
+            import streamlit as st
             
-            # 1. Busca todos os usuários cadastrados que não são administradores
-            resposta_usuarios = supabase_client.table("usuarios_app").select("id").eq("is_admin", False).execute()
+            # 2. Criamos uma instância local do cliente Supabase para a Thread usar
+            sub_client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+            
+            # 3. Busca todos os usuários cadastrados que não são administradores
+            resposta_usuarios = sub_client.table("usuarios_app").select("id").eq("is_admin", False).execute()
             
             if resposta_usuarios.data:
                 for atleta in resposta_usuarios.data:
                     atleta_id = atleta.get("id")
                     if atleta_id:
                         try:
-                            # 2. Processa os treinos individualmente passando o ID correto
+                            # 4. Processa os treinos individualmente passando o ID correto
                             processar_novos_treinos(atleta_id)
                             print(f"   ✅ Atleta {atleta_id} verificado com sucesso.")
                         except Exception as erro_atleta:
