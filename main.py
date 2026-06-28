@@ -78,6 +78,10 @@ def servico_vigilante_30min():
     while True:
         try:
             print(f"🔄 Vigilante iniciando varredura de atletas às {datetime.now().strftime('%H:%M:%S')}...")
+            
+            # IMPORTAÇÃO FORÇADA DENTRO DA THREAD PARA EVITAR 'NOT DEFINED'
+            from processar_fila import processar_novos_treinos
+            
             # 1. Busca todos os usuários cadastrados que não são administradores
             resposta_usuarios = supabase_client.table("usuarios_app").select("id").eq("is_admin", False).execute()
             
