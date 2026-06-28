@@ -15,7 +15,9 @@ import uuid
 from modules.ui import aplicar_estilo_css, exibir_logo_rodape, estilizar_botoes
 from modules.views import renderizar_tela_admin, renderizar_tela_bloqueio_financeiro, enviar_notificacao_treino, renderizar_edicao_perfil
 
-# Importação da sua função de processamento de fila
+# ============================================================================
+# IMPORTAÇÕES COM TRATAMENTO DE ERRO (CORRIGIDO ALINHAMENTO)
+# ============================================================================
 try:
     from processar_fila import processar_novos_treinos
     from auth_strava import obter_token_valido
