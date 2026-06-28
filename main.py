@@ -16,7 +16,7 @@ from modules.ui import aplicar_estilo_css, exibir_logo_rodape, estilizar_botoes
 from modules.views import renderizar_tela_admin, renderizar_tela_bloqueio_financeiro, enviar_notificacao_treino, renderizar_edicao_perfil
 
 # ============================================================================
-# IMPORTAÇÕES COM TRATAMENTO DE ERRO (CORRIGIDO ALINHAMENTO)
+# IMPORTAÇÕES COM TRATAMENTO DE ERRO (REALINHADO)
 # ============================================================================
 try:
     from processar_fila import processar_novos_treinos
