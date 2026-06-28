@@ -110,7 +110,6 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
             
             atividades = resposta_strava.json()
             
-            # Se o Strava der erro de autenticação, ele devolve um dicionário com a mensagem de erro, não uma lista
             if isinstance(atividades, dict) and "message" in atividades:
                 print(f"❌ [DIAGNÓSTICO] Erro retornado pela API do Strava: {atividades}")
                 continue
@@ -126,9 +125,8 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
                     dist = act.get('distance', 0) / 1000
                     dur_min = int(act.get('moving_time', 0) / 60)
                     
-                    # Se for muito curta, o código ignora. Vamos colocar um print para sabermos se foi ignorada aqui
-                    # Trava reduzida para facilitar testes manuais rápidos
-                    if dur_min < 1 and dist < 0.01: continue
+                    # CORRIGIDO AQUI: Alinhamento preciso da trava de validação rápida
+                    if dur_min < 1 and dist < 0.01:
                         print(f"   ⚠️ Atividade {nome_atividade} ignorada por ser muito curta ({dur_min} min, {dist} km)")
                         continue 
 
@@ -204,7 +202,6 @@ def processar_novos_treinos(user_id_especifico=None, origem_botao=False):
         print(f"❌ Erro Fila: {e}")
 
 if __name__ == "__main__":
-    # Loop para rodar como serviço independente se necessário
     while True:
         processar_novos_treinos()
         time.sleep(1800)
